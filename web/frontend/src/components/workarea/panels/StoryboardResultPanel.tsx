@@ -1,18 +1,29 @@
-import { useState } from "react";
-import type { StoryboardScene } from "@/stores/types";
+import { useState, useMemo } from "react";
+import type { StoryboardScene, WorkflowStep } from "@/stores/types";
 import { validateArrayData } from "./validate";
 
-// StoryboardResultPanel — storyboard shot grid
+// StoryboardResultPanel — storyboard shot grid with scene switching
 export function StoryboardResultPanel({
   data,
   onEdit,
+  step,
 }: {
   data: unknown;
   onEdit?: (path: string, value: unknown) => void;
+  step?: WorkflowStep;
 }) {
   const scenes = validateArrayData(data, "StoryboardResultPanel") as StoryboardScene[];
   const [showEditor, setShowEditor] = useState(false);
   const [editValue, setEditValue] = useState("");
+  const [activeSceneIdx, setActiveSceneIdx] = useState(0);
+
+  const hasSubSteps = step?.subSteps && step.subSteps.length > 0;
+
+  // Filter scenes based on active scene tab; if no subSteps, show all
+  const visibleScenes = useMemo(() => {
+    if (!hasSubSteps) return scenes;
+    return scenes.filter((s) => s.index === activeSceneIdx);
+  }, [scenes, hasSubSteps, activeSceneIdx]);
 
   const toggleEditor = () => {
     if (!showEditor) {
@@ -42,6 +53,32 @@ export function StoryboardResultPanel({
           {showEditor ? "关闭" : "编辑"}
         </button>
       </div>
+
+      {/* Scene switcher tabs */}
+      {hasSubSteps && !showEditor && (
+        <div className="flex gap-1 border-b pb-1">
+          {step.subSteps!.map((subStep, idx) => {
+            const sceneLabel = (() => {
+              const matched = scenes.find((s) => s.index === idx);
+              return matched ? `场景 ${idx + 1}: ${matched.title}` : subStep;
+            })();
+            return (
+              <button
+                key={subStep}
+                onClick={() => setActiveSceneIdx(idx)}
+                className={`px-3 py-1.5 text-sm rounded-t border-b-2 transition-colors ${
+                  activeSceneIdx === idx
+                    ? "border-primary text-primary font-medium bg-primary/5"
+                    : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                }`}
+              >
+                {sceneLabel}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {showEditor ? (
         <div className="space-y-2">
           <textarea
@@ -56,10 +93,10 @@ export function StoryboardResultPanel({
             保存
           </button>
         </div>
-      ) : scenes.length === 0 ? (
+      ) : visibleScenes.length === 0 ? (
         <p className="text-muted-foreground text-sm">暂无分镜数据</p>
       ) : (
-        scenes.map((scene, si) => (
+        visibleScenes.map((scene, si) => (
           <div key={si} className="border rounded-lg p-3 bg-card">
             <h4 className="font-medium text-sm mb-2">
               场景 {scene.index}: {scene.title}

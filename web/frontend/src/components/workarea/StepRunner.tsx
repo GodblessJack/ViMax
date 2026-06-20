@@ -102,7 +102,7 @@ export function StepRunner({ step }: { step: WorkflowStep }) {
                 <Suspense key={step.name} fallback={<div className="p-4 text-muted-foreground text-sm">加载结果面板...</div>}>
                   {/* TODO: When editing is implemented, panels should write to local state
                       that syncs both to store.artifacts AND server via WS */}
-                  <Panel data={artifactData} />
+                  <Panel data={artifactData} step={step} />
                 </Suspense>
               )
             }

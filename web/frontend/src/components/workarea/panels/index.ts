@@ -27,6 +27,7 @@ export const STEP_RESULT_COMPONENTS: Record<
     React.ComponentType<{
       data: unknown
       onEdit?: (path: string, value: unknown) => void
+      step?: import('@/stores/types').WorkflowStep
     }>
   >
 > = {
