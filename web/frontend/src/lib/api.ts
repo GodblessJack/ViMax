@@ -5,7 +5,7 @@ import { logger } from './logger'
 const BASE = '/api'
 const DEFAULT_TIMEOUT = 30_000  // 30 seconds
 
-async function request<T>(path: string, options?: RequestInit & { timeout?: number }): Promise<T> {
+export async function request<T>(path: string, options?: RequestInit & { timeout?: number }): Promise<T> {
   const { timeout = DEFAULT_TIMEOUT, ...fetchOptions } = options || {}
   const method = fetchOptions.method || 'GET'
   const controller = new AbortController()
