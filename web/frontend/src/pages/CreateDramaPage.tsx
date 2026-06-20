@@ -35,6 +35,13 @@ export default function CreateDramaPage() {
         }
         goToStep(stageToStep[detail.stage] ?? 0)
         logger.info('Session restored', { sessionId: sid, stage: detail.stage })
+        // Send resume message to Agent so it can pick up where it left off
+        const sendWsMessage = useWorkflowStore.getState().sendWsMessage
+        sendWsMessage({
+          type: 'user:message',
+          text: '/resume',
+          context: { current_step: detail.stage },
+        })
       }).catch((err) => {
         logger.error('Failed to restore session', err)
       })
