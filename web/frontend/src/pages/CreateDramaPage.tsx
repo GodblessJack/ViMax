@@ -4,7 +4,7 @@ import { WorkArea } from '@/components/workarea/WorkArea'
 import AIChatPanel from '@/components/layout/AIChatPanel'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useSessionWebSocket } from '@/hooks/useSessionWebSocket'
-import { getSession, createSession } from '@/lib/api'
+import { getSession, request } from '@/lib/api'
 import { logger } from '@/lib/logger'
 import type { WizardStep } from '@/lib/types'
 
@@ -31,26 +31,32 @@ export default function CreateDramaPage() {
   // WebSocket connection — dispatches events into the store
   useSessionWebSocket(sessionId)
 
-  // Start planning: create session + send WS start_workflow
+  // Start planning: call /start-workflow REST endpoint (session + workflow in one call)
   const handleStartPlanning = useCallback(async () => {
     if (!idea) return
     setLoading(true)
     try {
-      const resp = await createSession({ idea, style: style || 'wuxia' })
+      const resp = await request<{ session_id: string; stage: string }>(
+        '/pipeline/start-workflow',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            idea,
+            style: style || 'wuxia',
+            user_requirement: '',
+          }),
+        },
+      )
       const sid = resp.session_id
       setSessionId(sid)
       setWizardStep(2)
-      sendWsMessage({
-        type: 'user:action',
-        action: 'start_workflow',
-        payload: { session_id: sid, idea, style, user_requirement: '' },
-      })
+      logger.info('Workflow started via REST', { sessionId: sid })
     } catch (err) {
       logger.error('Failed to start planning', err)
     } finally {
       setLoading(false)
     }
-  }, [idea, style, setLoading, setSessionId, setWizardStep, sendWsMessage])
+  }, [idea, style, setLoading, setSessionId, setWizardStep])
 
   // Session restore from URL param
   useEffect(() => {
