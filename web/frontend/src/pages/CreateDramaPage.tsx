@@ -63,7 +63,7 @@ export default function CreateDramaPage() {
         method: 'POST',
         body: JSON.stringify({ idea, style: style || 'wuxia', user_requirement: '', session_id: sid }),
       })
-      logger.info('Workflow started', { sessionId: sid })
+      logger.userAction('start_workflow', { sessionId: sid })
     } catch (err) {
       logger.error('Failed to start planning', err)
     } finally {
