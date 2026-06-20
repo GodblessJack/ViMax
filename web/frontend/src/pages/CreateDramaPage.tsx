@@ -10,8 +10,12 @@ import AIChatPanel from '@/components/layout/AIChatPanel'
 import { usePipelineWebSocket } from '@/hooks/useWebSocket'
 import { useDraft } from '@/hooks/useDraft'
 import { cn } from '@/lib/utils'
-import { startPlanning, startRendering, getSession, cancelPipeline } from '@/lib/api'
+import { useToast } from '@/components/ui/Toast'
+import { startPlanning, startRendering, getSession, cancelPipeline, getFileUrl } from '@/lib/api'
 import type { WizardStep, ShotInfo } from '@/lib/types'
+// ── NEW: WorkflowStore wiring (additive alongside existing useState) ──
+import { useWorkflowStore } from '@/stores/workflowStore'
+import { useSessionWebSocket } from '@/hooks/useSessionWebSocket'
 
 // ── Pipeline Progress Sidebar ─────────────────────────────────────
 
@@ -75,6 +79,7 @@ export default function CreateDramaPage() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [planError, setPlanError] = useState('')
+  const { toast } = useToast()
 
   // Step 2 data
   const [story, setStory] = useState('')
@@ -88,6 +93,33 @@ export default function CreateDramaPage() {
 
   // Step 4 data
   const { events, connected, connectionState, clearEvents } = usePipelineWebSocket(sessionId)
+
+  // ── NEW: WorkflowStore wiring (additive alongside existing useState) ──
+  const store = useWorkflowStore()
+  // useSessionWebSocket is subscribed here so it hooks into WS lifecycle
+  // alongside the existing usePipelineWebSocket. The new hook dispatches to the
+  // store (via handleWsEvent / handleSessionEvent), while the old hook continues
+  // to provide events for Step4Generation component compatibility.
+  useSessionWebSocket(sessionId)
+
+  // One-way sync: existing useState -> WorkflowStore
+  // This keeps useState as the source of truth while making data
+  // available in the store for StepRunner components and WS events.
+  useEffect(() => { store.setWizardStep(step) }, [step]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setIdea(idea) }, [idea]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setStyle(style) }, [style]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setAiExtractedIdea(aiExtractedIdea) }, [aiExtractedIdea]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setAiExtractedStyle(aiExtractedStyle) }, [aiExtractedStyle]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setSessionId(sessionId) }, [sessionId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setLoading(loading) }, [loading]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setPlanError(planError) }, [planError]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setStory(story) }, [story]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setCharacters(characters) }, [characters]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setScenes(scenes) }, [scenes]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setStoryboardScenes(storyboardScenes) }, [storyboardScenes]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setSceneIndex(sceneIndex) }, [sceneIndex]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setSceneLoading(sceneLoading) }, [sceneLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { store.setCancelled(cancelled) }, [cancelled]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Draft auto-save & restore
   const { restore: restoreDraft, clear: clearDraft } = useDraft(idea, style)
@@ -113,19 +145,19 @@ export default function CreateDramaPage() {
 
   // ── Session restore: ?session=xxx resumes an existing session ─
   const [searchParams] = useSearchParams()
-  const restoredRef = useRef(false)
+  const lastRestoredRef = useRef<string | null>(null)
 
   useEffect(() => {
     const sid = searchParams.get('session')
-    if (!sid || restoredRef.current) return
-    restoredRef.current = true
+    if (!sid || lastRestoredRef.current === sid) return
+    lastRestoredRef.current = sid
 
     async function restore() {
       try {
-        const detail = await getSession(sid)
+        const detail = await getSession(sid!)
         if (!mountedRef.current) return
 
-        setSessionId(sid)
+        setSessionId(sid!)
         setIdea(detail.idea || '')
         setStyle(detail.style || 'wuxia')
 
@@ -140,51 +172,114 @@ export default function CreateDramaPage() {
           // Fetch artifacts and go to Step 2
           setStep(2)
           setLoading(false)
+          let scriptArr: string[] = []
           if (detail.artifact_checklist?.['idea2video/story.txt']) {
-            const r = await fetch(`/api/files/${sid}/idea2video/story.txt`)
+            const r = await fetch(getFileUrl(sid!, 'idea2video/story.txt'))
             if (mountedRef.current) setStory(r.ok ? await r.text() : '')
           }
           if (detail.artifact_checklist?.['idea2video/characters.json']) {
-            const r = await fetch(`/api/files/${sid}/idea2video/characters.json`)
+            const r = await fetch(getFileUrl(sid!, 'idea2video/characters.json'))
             if (mountedRef.current && r.ok) setCharacters(await r.json())
           }
           if (detail.artifact_checklist?.['idea2video/script.json']) {
-            const r = await fetch(`/api/files/${sid}/idea2video/script.json`)
+            const r = await fetch(getFileUrl(sid!, 'idea2video/script.json'))
             if (mountedRef.current && r.ok) {
-              const arr = await r.json()
-              setScenes(arr.map((_: string, i: number) => ({
-                index: i, title: `Scene ${i + 1}`, shot_count: 0,
-              })))
+              scriptArr = await r.json()
+              const sceneList = await Promise.all(
+                scriptArr.map(async (_: string, i: number) => {
+                  let sc = 0
+                  try {
+                    const sbResp = await fetch(getFileUrl(sid!, `idea2video/scene_${i}/storyboard.json`))
+                    if (sbResp.ok) { const shots = await sbResp.json(); sc = Array.isArray(shots) ? shots.length : 0 }
+                  } catch { /* ignore */ }
+                  return { index: i, title: `Scene ${i + 1}`, shot_count: sc }
+                })
+              )
+              setScenes(sceneList)
             }
           }
           if (detail.artifact_checklist?.['idea2video/scene_*/storyboard.json']) {
-            const r = await fetch(`/api/files/${sid}/idea2video/scene_0/storyboard.json`)
+            const r = await fetch(getFileUrl(sid!, 'idea2video/scene_0/storyboard.json'))
             if (mountedRef.current && r.ok) {
               const sb = await r.json()
               if (Array.isArray(sb) && sb.length > 0) {
-                const mapped = sb.map((s: any) => {
-                  return {
-                    idx: s.idx ?? 0, cam_idx: s.cam_idx ?? 0,
-                    visual_desc: s.visual_desc ?? '', audio_desc: s.audio_desc ?? '',
-                    angle: `机位${s.cam_idx ?? 0}`,
-                  }
-                })
-                setStoryboardScenes([{ index: 0, title: scenes[0]?.title || 'Scene 1', shots: mapped }])
-                // Update scene 0 shot_count with real data
+                const mapped = sb.map((s: any) => ({
+                  idx: s.idx ?? 0, cam_idx: s.cam_idx ?? 0,
+                  visual_desc: s.visual_desc ?? '', audio_desc: s.audio_desc ?? '',
+                  angle: `机位${s.cam_idx ?? 0}`,
+                }))
+                const parsedScenes = scriptArr.map((_: string, i: number) => ({
+                  index: i, title: `Scene ${i + 1}`, shot_count: 0,
+                }))
+                setScenes(parsedScenes)
+                setStoryboardScenes([{ index: 0, title: parsedScenes[0]?.title || 'Scene 1', shots: mapped }])
                 setScenes(prev => prev.map((s, i) =>
                   i === 0 ? { ...s, shot_count: sb.length } : s,
                 ))
               }
             }
           }
-        } else if (stage === 'rendering') {
-          setStep(4)
-        } else if (stage === 'rendered') {
-          setStep(5)
+        } else if (stage === 'rendering' || stage === 'rendered') {
+          if (stage === 'rendering') setStep(4)
+          else setStep(5)
+          setLoading(false)
+          // Load artifacts for context display
+          if (detail.artifact_checklist?.['idea2video/story.txt']) {
+            const r = await fetch(getFileUrl(sid!, 'idea2video/story.txt'))
+            if (mountedRef.current) setStory(r.ok ? await r.text() : '')
+          }
+          if (detail.artifact_checklist?.['idea2video/characters.json']) {
+            const r = await fetch(getFileUrl(sid!, 'idea2video/characters.json'))
+            if (mountedRef.current && r.ok) setCharacters(await r.json())
+          }
+          if (detail.artifact_checklist?.['idea2video/script.json']) {
+            const r = await fetch(getFileUrl(sid!, 'idea2video/script.json'))
+            if (mountedRef.current && r.ok) {
+              const arr = await r.json()
+              const sceneList = await Promise.all(
+                arr.map(async (_: string, i: number) => {
+                  let sc = 0
+                  try {
+                    const sbResp = await fetch(getFileUrl(sid!, `idea2video/scene_${i}/storyboard.json`))
+                    if (sbResp.ok) { const shots = await sbResp.json(); sc = Array.isArray(shots) ? shots.length : 0 }
+                  } catch { /* ignore */ }
+                  return { index: i, title: `Scene ${i + 1}`, shot_count: sc }
+                })
+              )
+              setScenes(sceneList)
+            }
+          }
         } else {
-          // error, cancelled → show Step 2 with error
+          // error, cancelled → show Step 2 with error, but still load existing artifacts
           setStep(2)
+          setLoading(false)
           setPlanError(detail.summary || `会话状态: ${stage}`)
+          // Load any artifacts that exist (they may have been generated before the error)
+          if (detail.artifact_checklist?.['idea2video/story.txt']) {
+            const r = await fetch(getFileUrl(sid!, 'idea2video/story.txt'))
+            if (mountedRef.current) setStory(r.ok ? await r.text() : '')
+          }
+          if (detail.artifact_checklist?.['idea2video/characters.json']) {
+            const r = await fetch(getFileUrl(sid!, 'idea2video/characters.json'))
+            if (mountedRef.current && r.ok) setCharacters(await r.json())
+          }
+          if (detail.artifact_checklist?.['idea2video/script.json']) {
+            const r = await fetch(getFileUrl(sid!, 'idea2video/script.json'))
+            if (mountedRef.current && r.ok) {
+              const arr = await r.json()
+              const sceneList = await Promise.all(
+                arr.map(async (_: string, i: number) => {
+                  let sc = 0
+                  try {
+                    const sbResp = await fetch(getFileUrl(sid!, `idea2video/scene_${i}/storyboard.json`))
+                    if (sbResp.ok) { const shots = await sbResp.json(); sc = Array.isArray(shots) ? shots.length : 0 }
+                  } catch { /* ignore */ }
+                  return { index: i, title: `Scene ${i + 1}`, shot_count: sc }
+                })
+              )
+              setScenes(sceneList)
+            }
+          }
         }
       } catch {
         // Session not found or API error — stay on Step 1
@@ -224,17 +319,17 @@ export default function CreateDramaPage() {
 
             // Fetch story
             if (detail.artifact_checklist?.['idea2video/story.txt']) {
-              const r = await fetch(`/api/files/${sid}/idea2video/story.txt`)
+              const r = await fetch(getFileUrl(sid, 'idea2video/story.txt'))
               if (mountedRef.current) setStory(r.ok ? await r.text() : '')
             }
             // Fetch characters
             if (detail.artifact_checklist?.['idea2video/characters.json']) {
-              const r = await fetch(`/api/files/${sid}/idea2video/characters.json`)
+              const r = await fetch(getFileUrl(sid, 'idea2video/characters.json'))
               if (mountedRef.current && r.ok) setCharacters(await r.json())
             }
             // Fetch script
             if (detail.artifact_checklist?.['idea2video/script.json']) {
-              const r = await fetch(`/api/files/${sid}/idea2video/script.json`)
+              const r = await fetch(getFileUrl(sid, 'idea2video/script.json'))
               if (mountedRef.current && r.ok) {
                 const arr = await r.json()
                 setScenes(arr.map((_: string, i: number) => ({
@@ -244,7 +339,7 @@ export default function CreateDramaPage() {
             }
             // Fetch storyboard
             if (detail.artifact_checklist?.['idea2video/scene_*/storyboard.json']) {
-              const r = await fetch(`/api/files/${sid}/idea2video/scene_0/storyboard.json`)
+              const r = await fetch(getFileUrl(sid, 'idea2video/scene_0/storyboard.json'))
               if (mountedRef.current && r.ok) {
                 const sb = await r.json()
                 if (Array.isArray(sb) && sb.length > 0) {
@@ -253,7 +348,7 @@ export default function CreateDramaPage() {
                     visual_desc: s.visual_desc ?? '', audio_desc: s.audio_desc ?? '',
                     angle: `机位${s.cam_idx ?? 0}`,
                   }})
-                  setStoryboardScenes([{ index: 0, title: scenes[0]?.title || 'Scene 1', shots: mapped2 }])
+                  setStoryboardScenes([{ index: 0, title: 'Scene 1', shots: mapped2 }])
                   setScenes(prev => prev.map((s, i) =>
                     i === 0 ? { ...s, shot_count: sb.length } : s,
                   ))
@@ -273,9 +368,10 @@ export default function CreateDramaPage() {
       if (mountedRef.current) {
         setLoading(false)
         setPlanError(err?.message || String(err))
+        toast('error', '规划启动失败：' + (err?.message || '未知错误'))
       }
     }
-  }, [idea, style])
+  }, [idea, style, toast])
 
   // ── Cancel planning (Step 2) ──────────────────────────────────
   const handleCancelPlanning = useCallback(() => {
@@ -304,10 +400,37 @@ export default function CreateDramaPage() {
       await startRendering({ session_id: sessionId })
     } catch (err) {
       console.error('Rendering failed:', err)
+      toast('error', '渲染启动失败：' + ((err as any)?.message || '未知错误'))
     } finally {
       setLoading(false)
     }
-  }, [sessionId])
+  }, [sessionId, toast])
+
+  // ── AI Chat: forward user messages to the backend chat API ───────
+  const handleSendChatMessage = useCallback(async (message: string): Promise<string | null> => {
+    if (!sessionId && step > 1) return null
+    try {
+      const ctxParts: string[] = []
+      if (idea) ctxParts.push(`创意: ${idea}`)
+      if (story) ctxParts.push(`故事: ${story.slice(0, 300)}`)
+      if (characters.length) ctxParts.push(`角色: ${characters.map((c: any) => c.identifier || c.name || '').filter(Boolean).join(', ')}`)
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          session_id: sessionId || '',
+          step,
+          context: ctxParts.join('\n'),
+        }),
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.reply || null
+    } catch {
+      return null
+    }
+  }, [sessionId, step, idea, story, characters])
 
   const isComplete = events.some(e => e.type === 'pipeline_complete')
 
@@ -323,9 +446,11 @@ export default function CreateDramaPage() {
   }, [step, isComplete])
 
   return (
-    <div className="flex h-full">
-      {/* Col 2: Pipeline Progress */}
-      <PipelinePanel step={step} sessionId={sessionId} />
+    <div className="flex flex-col lg:flex-row h-full">
+      {/* Col 1: Pipeline Progress — hidden on mobile, shown on desktop */}
+      <div className="hidden lg:block">
+        <PipelinePanel step={step} sessionId={sessionId} />
+      </div>
 
       {/* Col 3: Main Workspace — shows artifacts, AI drives the flow */}
       <div className="flex-1 p-6 overflow-y-auto">
@@ -360,7 +485,7 @@ export default function CreateDramaPage() {
               if (!storyboardScenes.find(s => s.index === i) && sessionId) {
                 setSceneLoading(true)
                 try {
-                  const r = await fetch(`/api/files/${sessionId}/idea2video/scene_${i}/storyboard.json`)
+                  const r = await fetch(getFileUrl(sessionId, `idea2video/scene_${i}/storyboard.json`))
                   if (r.ok) {
                     const sb = await r.json()
                     if (Array.isArray(sb) && sb.length > 0) {
@@ -401,7 +526,7 @@ export default function CreateDramaPage() {
           <div className="mt-4">
             <button
               onClick={() => { clearEvents(); setStep(5) }}
-              className="rounded-xl bg-primary px-6 py-2.5 text-primary-foreground hover:bg-[#E84A4F] font-semibold transition-all shadow-sm"
+              className="rounded-xl bg-primary px-6 py-2.5 text-primary-foreground hover:brightness-90 font-semibold transition-all shadow-sm"
             >
               查看视频 →
             </button>
@@ -409,8 +534,9 @@ export default function CreateDramaPage() {
         )}
       </div>
 
-      {/* Col 4: AI Chat Panel — core interaction hub, always visible, no collapse */}
-      <AIChatPanel
+      {/* Col 4: AI Chat Panel — always visible on desktop, toggleable overlay on mobile */}
+      <div className="hidden lg:block">
+        <AIChatPanel
         step={step}
         sessionId={sessionId}
         idea={idea}
@@ -422,7 +548,9 @@ export default function CreateDramaPage() {
         onIdeaExtracted={(v) => { setIdea(v); setAiExtractedIdea(v) }}
         onStyleExtracted={(v) => { setStyle(v); setAiExtractedStyle(v) }}
         onStartPlanning={handleStartPlanning}
+        onSendMessage={handleSendChatMessage}
       />
+      </div>
     </div>
   )
 }
