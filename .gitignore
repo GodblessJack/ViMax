@@ -20,3 +20,4 @@ node_modules/
 configs/*.local.json
 configs/*.local.yaml
 !configs/agent.local.yaml
+.gstack/
