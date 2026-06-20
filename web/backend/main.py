@@ -5,6 +5,29 @@ Start with:
     uvicorn web.backend.main:app --reload --host 0.0.0.0 --port 8000
 """
 
+# ── Logging — configure FIRST, before any module touch ─────────────────
+import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
+LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-7s] %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        RotatingFileHandler(
+            LOG_DIR / "vimax_web.log",
+            maxBytes=10 * 1024 * 1024,   # 10 MB per file
+            backupCount=10,               # keep 10 old files
+            encoding="utf-8",
+        ),
+        logging.StreamHandler(),          # also print to terminal
+    ],
+)
+
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -21,10 +44,12 @@ from web.backend.services.workspace_service import WorkspaceService
 _session_service: SessionService | None = None
 _pipeline_service = None  # type: ignore — lazy-loaded PipelineService
 _workspace_service: WorkspaceService | None = None
+_agent_service = None     # type: ignore — lazy-loaded AgentService
 
 
 def get_session_service() -> SessionService:
-    assert _session_service is not None, "SessionService not initialized"
+    if _session_service is None:
+        raise RuntimeError("SessionService not initialized")
     return _session_service
 
 
@@ -37,8 +62,22 @@ def get_pipeline_service():
 
 
 def get_workspace_service() -> WorkspaceService:
-    assert _workspace_service is not None, "WorkspaceService not initialized"
+    if _workspace_service is None:
+        raise RuntimeError("WorkspaceService not initialized")
     return _workspace_service
+
+
+def get_agent_service():
+    """Lazy-initialized AgentService singleton.
+
+    AgentService wraps PipelineService with an Anthropic SDK Agent that
+    manages the creative workflow through conversational interaction.
+    """
+    global _agent_service
+    if _agent_service is None:
+        from web.backend.services.agent_service import AgentService
+        _agent_service = AgentService(pipeline_service=get_pipeline_service())
+    return _agent_service
 
 
 # ── Lifespan ─────────────────────────────────────────────────────────
@@ -72,6 +111,7 @@ async def lifespan(app: FastAPI):
     _session_service = None
     _pipeline_service = None
     _workspace_service = None
+    _agent_service = None
 
 
 # ── App ──────────────────────────────────────────────────────────────
@@ -90,6 +130,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rate limiter — 120 req/min per IP
+from web.backend.middleware import RateLimiterMiddleware
+app.add_middleware(RateLimiterMiddleware, max_requests=120, window_seconds=60)
 
 # ── Routers ──────────────────────────────────────────────────────────
 
