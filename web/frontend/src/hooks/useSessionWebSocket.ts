@@ -52,8 +52,8 @@ export function useSessionWebSocket(sessionId: string | null) {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    // Use backend directly for WebSocket (Vite proxy may not handle WS upgrade reliably)
-    const wsHost = import.meta.env.DEV ? 'localhost:8000' : window.location.host
+    // Use Vite proxy in dev (handles WS correctly), direct backend in prod
+    const wsHost = import.meta.env.DEV ? window.location.host : window.location.host
     const wsUrl = `${protocol}//${wsHost}/ws/session/${sid}`
 
     try {
