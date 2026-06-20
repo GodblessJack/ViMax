@@ -80,6 +80,7 @@ export default function CreateDramaPage() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [planError, setPlanError] = useState('')
+  const [cancelled, setCancelled] = useState(false)
   const { toast } = useToast()
 
   // Step 2 data
@@ -383,7 +384,6 @@ export default function CreateDramaPage() {
   }, [])
 
   // ── Cancel rendering (Step 4) ─────────────────────────────────
-  const [cancelled, setCancelled] = useState(false)
   const handleCancelRendering = useCallback(async () => {
     if (!sessionId) return
     try { await cancelPipeline(sessionId) } catch { /* best effort */ }

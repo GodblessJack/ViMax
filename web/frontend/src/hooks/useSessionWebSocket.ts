@@ -33,6 +33,7 @@ export function useSessionWebSocket(sessionId: string | null) {
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const mountedRef = useRef(true)
   const sessionIdRef = useRef<string | null>(null)
+  const lastProcessedSidRef = useRef<string | null | undefined>(undefined) // tracks last processed sessionId to avoid reset loops
 
   // ── Connect ─────────────────────────────────────────────────────────
   const connect = useCallback((sid: string) => {
@@ -190,6 +191,10 @@ export function useSessionWebSocket(sessionId: string | null) {
   // ── Session ID changes ──────────────────────────────────────────────
 
   useEffect(() => {
+    // Only act on sessionId transitions, not every render
+    if (lastProcessedSidRef.current === sessionId) return
+    lastProcessedSidRef.current = sessionId
+
     if (!sessionId) {
       // Clear state when session is null
       store.reset()
