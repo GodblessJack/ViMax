@@ -16,6 +16,13 @@ def _get_service():
 
 @router.post("/plan", response_model=PipelineStartResponse, status_code=202)
 async def start_planning(body: PipelinePlanRequest):
+    """Start the AI planning phase for a session.
+
+    .. deprecated::
+        This endpoint is DEPRECATED and will be removed in a future release.
+        Planning is now driven by the Agent's ``run_step`` tool via WebSocket.
+        See architecture-v2-design.md Section 6.4.
+    """
     try:
         return await _get_service().start_planning(body)
     except KeyError as exc:
@@ -26,6 +33,13 @@ async def start_planning(body: PipelinePlanRequest):
 
 @router.post("/render", response_model=PipelineStartResponse, status_code=202)
 async def start_rendering(body: PipelineRenderRequest):
+    """Start the rendering phase for a session.
+
+    .. deprecated::
+        This endpoint is DEPRECATED and will be removed in a future release.
+        Rendering is now driven by the Agent's ``run_step`` tool via WebSocket.
+        See architecture-v2-design.md Section 6.4.
+    """
     try:
         return await _get_service().start_rendering(body)
     except ValueError as exc:

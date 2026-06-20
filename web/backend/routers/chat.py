@@ -62,6 +62,13 @@ def _build_chat_model():
 
 @router.post("", response_model=ChatResponse)
 async def chat(body: ChatRequest):
+    """Send a chat message to the AI assistant.
+
+    .. deprecated::
+        This endpoint is DEPRECATED and will be removed in a future release.
+        Use the WebSocket ``user:message`` event instead for real-time chat.
+        See architecture-v2-design.md Section 6.4.
+    """
     # Guard: reject empty messages early
     if not body.message.strip():
         return ChatResponse(reply="请描述你想创建的短剧内容，或提出具体问题，我会尽力帮你。")
