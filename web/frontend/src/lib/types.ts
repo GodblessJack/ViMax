@@ -34,7 +34,6 @@ export type SessionDetail = SessionSummary & {
   user_requirement: string
   artifact_checklist: Record<string, boolean>
   working_dir: string
-  shot_count: number
 }
 
 // ── Wizard Step Types ──────────────────────────────────────────────
@@ -67,14 +66,6 @@ export type ShotInfo = {
   visual_desc: string
   audio_desc: string
   angle: string
-}
-
-/** Raw storyboard item from the API (before mapping to ShotInfo). */
-export interface StoryboardJsonItem {
-  idx?: number
-  cam_idx?: number
-  visual_desc?: string
-  audio_desc?: string
 }
 
 // ── Work Types ─────────────────────────────────────────────────────

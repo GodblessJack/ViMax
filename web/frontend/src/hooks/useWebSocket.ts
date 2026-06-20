@@ -1,92 +1,117 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import type { PipelineEvent } from '@/lib/types'
 
-const MAX_RECONNECT_DELAY = 30_000
-const INITIAL_RECONNECT_DELAY = 1_000
+type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
 
 export function usePipelineWebSocket(sessionId: string | null) {
   const [events, setEvents] = useState<PipelineEvent[]>([])
-  const [connected, setConnected] = useState(false)
+  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
   const wsRef = useRef<WebSocket | null>(null)
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const retryCountRef = useRef(0)
+  const retriesRef = useRef(0)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef = useRef(true)
 
-  const scheduleReconnect = useCallback(() => {
-    if (!mountedRef.current) return
-    const delay = Math.min(
-      INITIAL_RECONNECT_DELAY * Math.pow(2, retryCountRef.current),
-      MAX_RECONNECT_DELAY,
-    )
-    retryCountRef.current += 1
-    reconnectTimerRef.current = setTimeout(() => {
-      if (mountedRef.current) {
-        // Connect via a fresh WebSocket — avoids stale closure issues
-        connectWs()
-      }
-    }, delay)
-    // scheduleReconnect intentionally has no dependencies — it uses refs for state
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const maxRetries = 5
 
-  // Standalone connect function (not useCallback) to avoid declaration ordering issues
-  function connectWs() {
-    if (!sessionId || !mountedRef.current) return
+  const connect = useCallback((sid: string) => {
+    if (!mountedRef.current) return
+    if (retriesRef.current >= maxRetries) {
+      setConnectionState('disconnected')
+      return
+    }
+
+    if (retriesRef.current > 0) {
+      setConnectionState('reconnecting')
+    } else {
+      setConnectionState('connecting')
+    }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws/pipeline/${sessionId}`
-    const ws = new WebSocket(wsUrl)
+    const wsUrl = `${protocol}//${window.location.host}/ws/pipeline/${sid}`
 
-    ws.onopen = () => {
+    try {
+      const ws = new WebSocket(wsUrl)
+
+      ws.onopen = () => {
+        if (!mountedRef.current) { ws.close(); return }
+        retriesRef.current = 0
+        setConnectionState('connected')
+      }
+
+      ws.onclose = () => {
+        if (!mountedRef.current) return
+        setConnectionState('disconnected')
+        // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+        if (retriesRef.current < maxRetries) {
+          const delay = Math.min(1000 * Math.pow(2, retriesRef.current), 16000)
+          timerRef.current = setTimeout(() => {
+            retriesRef.current++
+            connect(sid)
+          }, delay)
+        }
+      }
+
+      ws.onmessage = (e) => {
+        if (!mountedRef.current) return
+        try {
+          const event = JSON.parse(e.data) as PipelineEvent
+          setEvents((prev) => [...prev, event])
+        } catch { /* Ignore malformed events */ }
+      }
+
+      ws.onerror = () => {
+        // onclose will fire after this
+      }
+
+      wsRef.current = ws
+    } catch {
+      // Construction failed — will retry through onclose logic
       if (mountedRef.current) {
-        setConnected(true)
-        retryCountRef.current = 0
+        const delay = Math.min(1000 * Math.pow(2, retriesRef.current), 16000)
+        timerRef.current = setTimeout(() => {
+          retriesRef.current++
+          connect(sid)
+        }, delay)
       }
     }
-
-    ws.onclose = () => {
-      if (mountedRef.current) {
-        setConnected(false)
-        scheduleReconnect()
-      }
-    }
-
-    ws.onerror = () => {
-      if (mountedRef.current) setConnected(false)
-    }
-
-    ws.onmessage = (e) => {
-      if (!mountedRef.current) return
-      try {
-        const event = JSON.parse(e.data) as PipelineEvent
-        setEvents((prev) => [...prev, event])
-      } catch {
-        // Ignore malformed events
-      }
-    }
-
-    wsRef.current = ws
-  }
+  }, [])
 
   useEffect(() => {
     mountedRef.current = true
-    retryCountRef.current = 0
-    // Clear stale events when sessionId changes — intentional side-effect
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEvents([])
-    connectWs()
     return () => {
       mountedRef.current = false
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+      if (wsRef.current) {
+        wsRef.current.onclose = null // prevent reconnect on intentional close
+        wsRef.current.close()
+        wsRef.current = null
+      }
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!sessionId) {
+      setEvents([])
+      setConnectionState('disconnected')
+      retriesRef.current = 0
+      return
+    }
+
+    retriesRef.current = 0
+    setEvents([])
+    connect(sessionId)
+
+    return () => {
       if (wsRef.current) {
         wsRef.current.onclose = null
         wsRef.current.close()
+        wsRef.current = null
       }
+      if (timerRef.current) clearTimeout(timerRef.current)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId])
+  }, [sessionId, connect])
 
   const clearEvents = useCallback(() => setEvents([]), [])
 
-  return { events, connected, clearEvents }
+  return { events, connected: connectionState === 'connected', connectionState, clearEvents }
 }

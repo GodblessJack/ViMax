@@ -3,29 +3,29 @@
 
 llm:
   model_provider: openai
-  model: <YOUR_LLM_MODEL>
-  base_url: <YOUR_LLM_BASE_URL>
-  api_key: ''
+  model: deepseek-v4-pro
+  base_url: https://api.deepseek.com/v1
+  api_key: 'sk-043194fdb7384b52b95c2482f3d129d3'
 
 image:
-  model: <YOUR_IMAGE_MODEL>
-  base_url: <YOUR_IMAGE_BASE_URL>
+  model: gemini-3.1-flash-image-preview
+  base_url: https://yunwu.ai
   api_key: ''
 
 video:
-  model: <YOUR_VIDEO_MODEL>
-  base_url: <YOUR_VIDEO_BASE_URL>
+  model: veo3.1-fast
+  base_url: https://openrouter.ai/api/v1
   api_key: ''
 
 # Optional. Fill these only when using novel2video planning.
 embedding:
   model_provider: openai
-  model: <YOUR_EMBEDDING_MODEL>
-  base_url: <YOUR_EMBEDDING_BASE_URL>
+  model: text-embedding-3-small
+  base_url: ''
   api_key: ''
 
 # Optional. Fill these only when using novel2video planning.
 reranker:
-  model: <YOUR_RERANKER_MODEL>
-  base_url: <YOUR_RERANKER_BASE_URL>
+  model: BAAI/bge-reranker-v2-m3
+  base_url: ''
   api_key: ''

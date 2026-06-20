@@ -18,7 +18,7 @@ export default function StepIndicator({ current, onStepClick }: { current: Wizar
             onClick={() => onStepClick?.(s.step)}
             disabled={s.step > current}
             className={cn(
-              'flex items-center justify-center h-8 w-8 rounded-full text-xs font-medium transition-colors',
+              'flex items-center justify-center h-9 w-9 rounded-full text-xs font-medium transition-colors',
               s.step < current && 'bg-primary text-primary-foreground',
               s.step === current && 'bg-primary text-primary-foreground ring-2 ring-primary/30',
               s.step > current && 'bg-muted text-muted-foreground cursor-not-allowed',
