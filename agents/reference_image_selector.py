@@ -1,13 +1,11 @@
+import asyncio
 import logging
 from typing import List, Tuple
-from tenacity import retry, stop_after_attempt
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain.chat_models import init_chat_model
 from utils.image import image_path_to_b64
-
-from utils.retry import after_func
 
 system_prompt_template_select_reference_images_only_text = \
 """
@@ -144,93 +142,134 @@ class ReferenceImageSelector:
         self.chat_model = chat_model
 
 
-    @retry(
-        stop=stop_after_attempt(3),
-        after=after_func,
-    )
     async def select_reference_images_and_generate_prompt(
         self,
         available_image_path_and_text_pairs: List[Tuple[str, str]],
         frame_description: str,
-    ):
-        # Guard: skip LLM selection when there are too few reference images.
-        # The multimodal path (triggered when < 8 images) sends images to the LLM
-        # which fails with text-only models like DeepSeek.  When the set is small
-        # we just use everything thatʼs available.
+    ) -> dict:
+        """Select reference images and generate a text prompt for image generation.
+
+        Returns a plain dict with keys ``ref_image_indices`` (indices into
+        *available_image_path_and_text_pairs*) and ``text_prompt``.  Callers
+        can ``json.dump`` the result directly — no ``.model_dump()`` needed.
+
+        Retry policy: only transient LLM errors (network, timeout) are retried
+        once.  Deterministic errors (empty input, invalid indices, parsing
+        failures) fail fast or fall back to using the full set without wasting
+        API credits on futile retries.
+        """
+        # ── Input validation: fail fast on empty input ──────────────────
+        if not available_image_path_and_text_pairs:
+            return {
+                "ref_image_indices": [],
+                "text_prompt": frame_description,
+            }
+
+        # ── Guard: skip LLM when too few images (text-only models like
+        #    DeepSeek cannot handle the multimodal path, and with < 8 images
+        #    the selection is trivial). ───────────────────────────────────
         if len(available_image_path_and_text_pairs) < 8:
-            return RefImageIndicesAndTextPrompt(
-                ref_image_indices=list(range(len(available_image_path_and_text_pairs))),
-                text_prompt=frame_description,
-            )
+            return {
+                "ref_image_indices": list(range(len(available_image_path_and_text_pairs))),
+                "text_prompt": frame_description,
+            }
 
-        filtered_image_path_and_text_pairs = available_image_path_and_text_pairs
-
-        # 1. filter images using text-only model
-        if len(available_image_path_and_text_pairs) >= 8:
-            human_content = []
-            for idx, (_, text) in enumerate(available_image_path_and_text_pairs):
+        # ── Step 1: text-only pre-filter (retry once on transient errors) ──
+        step1_indices: List[int] = []
+        for attempt in range(2):
+            try:
+                human_content = []
+                for idx, (_, text) in enumerate(available_image_path_and_text_pairs):
+                    human_content.append({"type": "text", "text": f"Image {idx}: {text}"})
                 human_content.append({
                     "type": "text",
-                    "text": f"Image {idx}: {text}"
+                    "text": human_prompt_template_select_reference_images.format(
+                        frame_description=frame_description)
                 })
-            human_content.append({
-                "type": "text",
-                "text": human_prompt_template_select_reference_images.format(frame_description=frame_description)
-            })
-            parser = PydanticOutputParser(pydantic_object=RefImageIndicesAndTextPrompt)
-
-            messages = [
-                SystemMessage(content=system_prompt_template_select_reference_images_only_text.format(format_instructions=parser.get_format_instructions())),
-                HumanMessage(content=human_content)
-            ]
-
-            chain = self.chat_model | parser
-
-            try:
+                parser = PydanticOutputParser(pydantic_object=RefImageIndicesAndTextPrompt)
+                messages = [
+                    SystemMessage(content=system_prompt_template_select_reference_images_only_text.format(
+                        format_instructions=parser.get_format_instructions())),
+                    HumanMessage(content=human_content)
+                ]
+                chain = self.chat_model | parser
                 ref = await chain.ainvoke(messages)
-                filtered_image_path_and_text_pairs = select_pairs_by_indices(available_image_path_and_text_pairs, ref.ref_image_indices)
-                logging.info(f"Filtered image idx:{ref.ref_image_indices}")
-                
-            except Exception as e:
-                logging.error(f"Error get image prompt: \n{e}")
-                raise e
+                step1_indices = list(dict.fromkeys(ref.ref_image_indices))  # dedup, keep order
+                select_pairs_by_indices(available_image_path_and_text_pairs, step1_indices)
+                logging.info("Step 1 filtered indices: %s", step1_indices)
+                break  # success
+            except ValueError:
+                logging.error(
+                    "Step 1 returned invalid indices for %d images, using full set.",
+                    len(available_image_path_and_text_pairs))
+                step1_indices = list(range(len(available_image_path_and_text_pairs)))
+                break
+            except Exception:
+                if attempt == 0:
+                    logging.warning("Step 1 transient error (attempt 1/2), retrying...")
+                    await asyncio.sleep(2)
+                else:
+                    logging.error("Step 1 failed after 2 attempts, using full set.")
+                    step1_indices = list(range(len(available_image_path_and_text_pairs)))
 
-        # 2. filter images using multimodal model
+        filtered_pairs = [available_image_path_and_text_pairs[i] for i in step1_indices]
+
+        # ── Step 2: multimodal final selection ──────────────────────────
+        if not filtered_pairs:
+            return {
+                "ref_image_indices": [],
+                "text_prompt": frame_description,
+            }
+
+        # ── Step 2: multimodal final selection (retry once on transient errors) ──
         human_content = []
-        for idx, (image_path, text) in enumerate(filtered_image_path_and_text_pairs):
-            human_content.append({
-                "type": "text",
-                "text": f"Image {idx}: {text}"
-            })
+        for idx, (image_path, text) in enumerate(filtered_pairs):
+            human_content.append({"type": "text", "text": f"Image {idx}: {text}"})
             human_content.append({
                 "type": "image_url",
                 "image_url": {"url": image_path_to_b64(image_path)}
             })
         human_content.append({
             "type": "text",
-            "text": human_prompt_template_select_reference_images.format(frame_description=frame_description)
+            "text": human_prompt_template_select_reference_images.format(
+                frame_description=frame_description)
         })
 
         parser = PydanticOutputParser(pydantic_object=RefImageIndicesAndTextPrompt)
-
         messages = [
-            SystemMessage(content=system_prompt_template_select_reference_images_multimodal.format(format_instructions=parser.get_format_instructions())),
+            SystemMessage(content=system_prompt_template_select_reference_images_multimodal.format(
+                format_instructions=parser.get_format_instructions())),
             HumanMessage(content=human_content)
         ]
-
         chain = self.chat_model | parser
 
-        try:
-            response = await chain.ainvoke(messages)
-            reference_image_path_and_text_pairs = select_pairs_by_indices(filtered_image_path_and_text_pairs, response.ref_image_indices)
-            return {
-                "reference_image_path_and_text_pairs": reference_image_path_and_text_pairs,
-                "text_prompt": response.text_prompt,
-            }
+        final_indices = step1_indices  # fallback default
+        text_prompt = frame_description
+        for attempt in range(2):
+            try:
+                response = await chain.ainvoke(messages)
+                deduped = list(dict.fromkeys(response.ref_image_indices))  # dedup, keep order
+                select_pairs_by_indices(filtered_pairs, deduped)
+                final_indices = [step1_indices[i] for i in deduped]
+                text_prompt = response.text_prompt
+                break  # success
+            except ValueError:
+                logging.error(
+                    "Step 2 returned invalid indices for %d filtered images, "
+                    "using step-1 indices as fallback.", len(filtered_pairs))
+                break  # deterministic — don't retry
+            except Exception:
+                if attempt == 0:
+                    logging.warning("Step 2 transient error (attempt 1/2), retrying...")
+                    await asyncio.sleep(2)
+                else:
+                    logging.error(
+                        "Step 2 failed after 2 attempts, using step-1 indices as fallback.")
 
-        except Exception as e:
-            logging.error(f"Error get image prompt: \n{e}")
-            raise e
+        return {
+            "ref_image_indices": final_indices,
+            "text_prompt": text_prompt,
+        }
 
 
 

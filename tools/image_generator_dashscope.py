@@ -18,7 +18,6 @@ Usage::
 import asyncio
 import logging
 import os
-import time
 from io import BytesIO
 from typing import List, Optional
 
@@ -71,33 +70,44 @@ class ImageGeneratorDashScope:
         return self._session
 
     async def _submit_task(self, payload: dict) -> str:
-        """Submit image generation task, return task_id."""
+        """Submit image generation task, return task_id.
+
+        Rate-limit handling: up to 3 retries with exponential backoff + jitter.
+        Non-rate-limit errors (auth, invalid params) raise immediately.
+        """
         session = await self._get_session()
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "X-DashScope-Async": "enable",
         }
-        async with session.post(ENDPOINT, json=payload, headers=headers) as resp:
-            data = await resp.json()
-            if resp.status >= 400 or data.get("code"):
-                code = data.get("code", "UNKNOWN")
-                msg = data.get("message", str(data))
-                # Rate limiting — wait and retry once
-                if "Throttling" in str(code) or "Rate" in str(code):
-                    logger.warning("DashScope image rate limited, waiting 10s...")
-                    await asyncio.sleep(10)
-                    async with session.post(ENDPOINT, json=payload, headers=headers) as resp2:
-                        data = await resp2.json()
-                        if resp2.status >= 400 or data.get("code"):
-                            raise RuntimeError(f"DashScope image error: {data.get('code')} - {data.get('message')}")
-                else:
-                    raise RuntimeError(f"DashScope image error: {code} - {msg}")
-            task_id = data.get("output", {}).get("task_id")
-            if not task_id:
-                raise RuntimeError(f"DashScope image: no task_id in response: {data}")
-            logger.info("DashScope image task submitted: %s", task_id)
-            return task_id
+        last_error = None
+        for attempt in range(3):
+            async with session.post(ENDPOINT, json=payload, headers=headers) as resp:
+                data = await resp.json()
+            if resp.status < 400 and not data.get("code"):
+                break  # success
+            code = data.get("code", "UNKNOWN")
+            msg = data.get("message", str(data))
+            if "Throttling" in str(code) or "Rate" in str(code):
+                last_error = RuntimeError(f"DashScope image rate limited: {code} - {msg}")
+                if attempt < 2:  # 0, 1 → retry; 2 → last attempt
+                    wait = (2 ** attempt) * 10 + (hash(str(payload)) % 5)  # 10s, 20s, 40s ± jitter
+                    logger.warning(
+                        "DashScope image rate limited (attempt %d/3), waiting %ds...",
+                        attempt + 1, wait)
+                    await asyncio.sleep(wait)
+            else:
+                # Non-rate-limit error — fail immediately
+                raise RuntimeError(f"DashScope image error: {code} - {msg}")
+        else:
+            raise last_error  # type: ignore[misc]
+
+        task_id = data.get("output", {}).get("task_id")
+        if not task_id:
+            raise RuntimeError(f"DashScope image: no task_id in response: {data}")
+        logger.info("DashScope image task submitted: %s", task_id)
+        return task_id
 
     async def _poll_task(self, task_id: str) -> dict:
         """Poll task status, return output when SUCCEEDED."""

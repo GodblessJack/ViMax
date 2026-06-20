@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import sys
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -161,6 +162,13 @@ _STEP_TIMEOUT_SCRIPT = 300      # 5 minutes for script writing
 _STEP_TIMEOUT_SCENE_PLAN = 300  # 5 minutes per-scene planning (shot descriptions)
 _STEP_TIMEOUT_SCENE_RENDER = 600  # 10 minutes per-scene rendering (image+video gen)
 
+# ── Circuit breaker: prevent infinite render restarts ─────────────────
+# After _CB_MAX_FAILURES failures within _CB_WINDOW_SECONDS, further
+# render attempts for the same session are rejected until the window
+# expires.  This stops the "fail → restart → fail" money-burning loop.
+_CB_MAX_FAILURES = 3
+_CB_WINDOW_SECONDS = 1800  # 30 minutes
+
 
 class PipelineService:
     """Orchestrates ViMax pipeline execution with WebSocket progress bridging.
@@ -175,6 +183,7 @@ class PipelineService:
         self._tasks: dict[str, asyncio.Task] = {}
         self._cancel_events: dict[str, asyncio.Event] = {}
         self._ws_connections: dict[str, list] = {}  # session_id -> list of WebSocket
+        self._render_failures: dict[str, list[float]] = {}  # session_id -> [timestamps]
 
     # ── WebSocket connection registry ─────────────────────────────────
 
@@ -526,6 +535,22 @@ class PipelineService:
     ) -> PipelineStartResponse:
         session_id = request.session_id
 
+        # ── Circuit breaker: reject if too many recent failures ──────────
+        now = time.time()
+        timestamps = self._render_failures.get(session_id, [])
+        # Purge expired entries
+        timestamps = [t for t in timestamps if now - t < _CB_WINDOW_SECONDS]
+        self._render_failures[session_id] = timestamps
+        if len(timestamps) >= _CB_MAX_FAILURES:
+            wait_m = round((_CB_WINDOW_SECONDS - (now - timestamps[0])) / 60)
+            msg = (
+                f"渲染已连续失败 {len(timestamps)} 次，已触发熔断保护。"
+                f"请等待约 {wait_m} 分钟后再试，或使用新的 session。"
+            )
+            logger.warning("Circuit breaker open for session %s (%d failures in %ds window)",
+                           session_id, len(timestamps), _CB_WINDOW_SECONDS)
+            raise ValueError(msg)
+
         if session_id in self._tasks and not self._tasks[session_id].done():
             raise ValueError(f"Pipeline already running for session {session_id}")
 
@@ -676,6 +701,9 @@ class PipelineService:
                         "final_video_url": f"/api/files/{session_id}/idea2video/scene_0/final_video.mp4",
                     })
 
+            # Rendering succeeded — clear circuit-breaker failure history
+            self._render_failures.pop(session_id, None)
+
         except asyncio.CancelledError:
             self._session_index.update_stage(session_id, "cancelled", "Rendering cancelled")
             await self._broadcast_ws(session_id, {
@@ -683,6 +711,7 @@ class PipelineService:
                 "error": "Rendering was cancelled",
             })
         except asyncio.TimeoutError:
+            self._record_render_failure(session_id)
             logger.exception("Rendering timed out for session %s", session_id)
             friendly = "渲染超时 — AI 服务响应过慢，请重试或减少镜头数"
             self._session_index.update_stage(session_id, "error", friendly)
@@ -691,6 +720,7 @@ class PipelineService:
                 "error": friendly,
             })
         except Exception as exc:
+            self._record_render_failure(session_id)
             logger.exception("Rendering failed for session %s", session_id)
             friendly = f"渲染失败: {_friendly_error(exc)}"
             self._session_index.update_stage(session_id, "error", friendly)
@@ -740,9 +770,25 @@ class PipelineService:
             task.cancel()
         return {"cancelled": True, "session_id": session_id}
 
+    # ── Circuit breaker helpers ───────────────────────────────────────
+
+    def _record_render_failure(self, session_id: str) -> None:
+        """Record a render failure timestamp for circuit breaker tracking."""
+        self._render_failures.setdefault(session_id, []).append(time.time())
+
     # ── Cleanup ───────────────────────────────────────────────────────
 
     def _cleanup(self, session_id: str) -> None:
         self._tasks.pop(session_id, None)
         self._cancel_events.pop(session_id, None)
         self._ws_connections.pop(session_id, None)
+        # Purge expired circuit-breaker entries on every cleanup so
+        # abandoned sessions don't leak memory in long-running services.
+        ts = self._render_failures.get(session_id)
+        if ts:
+            now = time.time()
+            fresh = [t for t in ts if now - t < _CB_WINDOW_SECONDS]
+            if fresh:
+                self._render_failures[session_id] = fresh
+            else:
+                del self._render_failures[session_id]
