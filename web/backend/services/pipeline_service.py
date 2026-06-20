@@ -12,6 +12,7 @@ import logging
 import os
 import sys
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -21,7 +22,7 @@ from agent_runtime.config import (
     video_api_key, video_base_url, video_model,
 )
 from agent_runtime.session_index import SessionIndex
-from langchain.chat_models import init_chat_model
+# init_chat_model lazy-imported in _build_chat_model (heavy LangChain dependency)
 from pipelines.idea2video_pipeline import Idea2VideoPipeline
 from pipelines.script2video_pipeline import Script2VideoPipeline
 from tools.image_generator_nanobanana_google_api import ImageGeneratorNanobananaGoogleAPI
@@ -37,6 +38,44 @@ from web.backend.models.api_models import (
 logger = logging.getLogger(__name__)
 
 
+def _friendly_error(exc: Exception) -> str:
+    """Convert common Python exceptions into user-friendly Chinese messages."""
+    msg = str(exc)
+    # RetryError / tenacity errors — API call failed after retries
+    if "RetryError" in type(exc).__name__ or "RetryError" in msg:
+        inner = getattr(exc, "last_attempt", None)
+        if inner is not None:
+            inner_exc = getattr(inner, "_exception", None) or getattr(inner, "exception", lambda: None)()
+            if inner_exc is not None:
+                inner_msg = str(inner_exc)[:120]
+                if "ConnectionError" in type(inner_exc).__name__ or "connect" in inner_msg.lower():
+                    return f"无法连接到 AI 服务，请检查网络后重试"
+                if "RateLimitError" in type(inner_exc).__name__ or "rate" in inner_msg.lower() or "429" in inner_msg:
+                    return f"AI 服务请求过于频繁，请稍后重试"
+                if "timeout" in inner_msg.lower() or "TimedOut" in type(inner_exc).__name__:
+                    return f"AI 服务响应超时，请缩短内容后重试"
+                if "Auth" in type(inner_exc).__name__ or "key" in inner_msg.lower() or "401" in inner_msg or "403" in inner_msg or "无效" in inner_msg or "令牌" in inner_msg:
+                    return f"AI 服务认证失败，请检查 API 密钥配置"
+                return f"AI 服务调用失败: {inner_msg}"
+        return "AI 服务暂时不可用，请稍后重试"
+
+    # OpenAI / LangChain errors
+    if "ClientError" in msg or "APIConnectionError" in type(exc).__name__:
+        return "无法连接到 AI 服务，请检查网络后重试"
+    if "RateLimitError" in type(exc).__name__ or "rate_limit" in msg.lower():
+        return "AI 服务请求过于频繁，请稍后重试"
+    if "AuthenticationError" in type(exc).__name__ or "auth" in msg.lower():
+        return "AI 服务认证失败，请检查 API 密钥配置"
+    if "timeout" in msg.lower() or "TimedOut" in type(exc).__name__:
+        return "AI 服务响应超时，请缩短内容后重试"
+
+    # Clean up memory addresses
+    import re
+    cleaned = re.sub(r"<[^>]*at 0x[0-9a-f]+>", "<...>", msg)
+    cleaned = re.sub(r"0x[0-9a-f]+", "...", cleaned)
+    return cleaned[:150]
+
+
 # ── Dummy generator (reused from vimax_adapters pattern) ──────────────
 
 class _UnavailableGenerator:
@@ -50,37 +89,78 @@ class _UnavailableGenerator:
         raise RuntimeError("Video generation is not available during planning")
 
 
-# ── Output suppression (reused from vimax_adapters pattern) ───────────
+# ── Output tee — preserve pipeline prints while also logging ────────────
 
-class _DiscardStream:
-    def write(self, data: str) -> None:
-        pass
+class _TeeStream:
+    """Duplicates writes to an original stream AND a delegate stream."""
+
+    def __init__(self, original, delegate):
+        self.original = original
+        self.delegate = delegate
+
+    def write(self, data: str) -> int:
+        self.delegate.write(data)
+        return self.original.write(data)
+
     def flush(self) -> None:
-        pass
+        self.original.flush()
+        self.delegate.flush()
 
 
 @contextmanager
-def _suppress_pipeline_output():
-    """Redirect stdout and mute noisy loggers during pipeline execution."""
+def _capture_pipeline_output():
+    """Tee stdout/stderr to log file during pipeline execution.
+
+    Instead of discarding output (which loses diagnostics), we duplicate
+    everything to ``web/logs/pipeline_run.log`` so every pipeline run is
+    fully traceable.  Noisy third-party loggers are still muted.
+    """
+    log_dir = Path(__file__).resolve().parent.parent.parent / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log_fh = None
     try:
+        log_fh = open(log_dir / "pipeline_run.log", "a", encoding="utf-8")
+        log_fh.write(
+            f"\n{'='*60}\n"
+            f"PIPELINE START  {datetime.now().isoformat()}\n"
+            f"{'='*60}\n"
+        )
         original_stdout = sys.stdout
-        sys.stdout = _DiscardStream()
-        # Silence known noisy loggers — save/restore original levels
-        _muted = ["pipelines", "agents", "tools", "httpx", "openai", "httpcore", ""]
+        original_stderr = sys.stderr
+        sys.stdout = _TeeStream(original_stdout, log_fh)
+        sys.stderr = _TeeStream(original_stderr, log_fh)
+        # Silence known noisy third-party loggers
+        _muted = ["httpx", "openai", "httpcore", ""]
         _saved = {}
         for name in _muted:
-            logger = logging.getLogger(name) if name else logging.getLogger()
-            _saved[name] = logger.level
-            logger.setLevel(logging.WARNING)
+            lgr = logging.getLogger(name) if name else logging.getLogger()
+            _saved[name] = lgr.level
+            lgr.setLevel(logging.WARNING)
         yield
     finally:
         sys.stdout = original_stdout
+        sys.stderr = original_stderr
         for name, level in _saved.items():
-            logger = logging.getLogger(name) if name else logging.getLogger()
-            logger.setLevel(level)
+            lgr = logging.getLogger(name) if name else logging.getLogger()
+            lgr.setLevel(level)
+        if log_fh is not None:
+            log_fh.write(
+                f"{'='*60}\n"
+                f"PIPELINE END    {datetime.now().isoformat()}\n"
+                f"{'='*60}\n\n"
+            )
+            log_fh.close()
 
 
 # ── Pipeline service ─────────────────────────────────────────────────
+
+# Timeouts for pipeline steps (seconds) — prevent indefinite hangs on LLM calls
+_STEP_TIMEOUT_STORY = 600       # 10 minutes for story development (DeepSeek can be slow)
+_STEP_TIMEOUT_CHARACTERS = 300  # 5 minutes for character extraction
+_STEP_TIMEOUT_SCRIPT = 300      # 5 minutes for script writing
+_STEP_TIMEOUT_SCENE_PLAN = 300  # 5 minutes per-scene planning (shot descriptions)
+_STEP_TIMEOUT_SCENE_RENDER = 600  # 10 minutes per-scene rendering (image+video gen)
+
 
 class PipelineService:
     """Orchestrates ViMax pipeline execution with WebSocket progress bridging.
@@ -152,15 +232,29 @@ class PipelineService:
 
     # ── Pipeline builders ─────────────────────────────────────────────
 
-    def _build_chat_model(self):
+    def _build_chat_model(self, multimodal: bool = False):
+        from langchain.chat_models import init_chat_model
         root = str(self._root)
+        ds_key = os.environ.get("DASHSCOPE_API_KEY", "")
+
+        # Rendering needs a vision-capable model (ReferenceImageSelector sends image_url)
+        if multimodal and ds_key:
+            return init_chat_model(
+                model="qwen-plus",
+                model_provider="openai",
+                api_key=ds_key,
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                timeout=300,
+                max_retries=0,
+                max_completion_tokens=4096,
+            )
+
         api_key = llm_api_key(root)
         model = llm_model(root)
         provider = llm_model_provider(root)
         base = llm_base_url(root)
 
         # DashScope fallback: use DASHSCOPE_API_KEY when primary key is missing
-        ds_key = os.environ.get("DASHSCOPE_API_KEY", "")
         if ds_key and not api_key:
             api_key = ds_key
             base = "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -292,11 +386,14 @@ class PipelineService:
                 "stage": "develop_story", "phase": "started",
                 "message": "Developing story from idea...",
             })
-            with _suppress_pipeline_output():
-                story = await pipeline.develop_story(
-                    idea=request.idea,
-                    user_requirement=request.user_requirement,
-                    quiet=True,
+            with _capture_pipeline_output():
+                story = await asyncio.wait_for(
+                    pipeline.develop_story(
+                        idea=request.idea,
+                        user_requirement=request.user_requirement,
+                        quiet=True,
+                    ),
+                    timeout=_STEP_TIMEOUT_STORY,
                 )
             await self._broadcast_ws(session_id, {
                 "type": "artifact_ready", "session_id": session_id,
@@ -311,8 +408,11 @@ class PipelineService:
                 "type": "pipeline_status", "session_id": session_id,
                 "stage": "extract_characters", "phase": "started",
             })
-            with _suppress_pipeline_output():
-                characters = await pipeline.extract_characters(story=story, quiet=True)
+            with _capture_pipeline_output():
+                characters = await asyncio.wait_for(
+                    pipeline.extract_characters(story=story, quiet=True),
+                    timeout=_STEP_TIMEOUT_CHARACTERS,
+                )
             await self._broadcast_ws(session_id, {
                 "type": "artifact_ready", "session_id": session_id,
                 "path": "idea2video/characters.json",
@@ -326,11 +426,14 @@ class PipelineService:
                 "type": "pipeline_status", "session_id": session_id,
                 "stage": "write_script", "phase": "started",
             })
-            with _suppress_pipeline_output():
-                scene_scripts = await pipeline.write_script_based_on_story(
-                    story=story,
-                    user_requirement=request.user_requirement,
-                    quiet=True,
+            with _capture_pipeline_output():
+                scene_scripts = await asyncio.wait_for(
+                    pipeline.write_script_based_on_story(
+                        story=story,
+                        user_requirement=request.user_requirement,
+                        quiet=True,
+                    ),
+                    timeout=_STEP_TIMEOUT_SCRIPT,
                 )
             await self._broadcast_ws(session_id, {
                 "type": "artifact_ready", "session_id": session_id,
@@ -338,10 +441,10 @@ class PipelineService:
                 "url": f"/api/files/{session_id}/idea2video/script.json",
             })
 
-            # Step 4: Plan text artifacts per scene
-            for idx, scene_script in enumerate(scene_scripts):
+            # Step 4: Plan text artifacts per scene (parallel — scenes are independent)
+            async def _plan_scene(idx: int, scene_script):
                 if cancel_evt.is_set():
-                    return
+                    return None
                 scene_dir = os.path.join(working_dir, f"scene_{idx}")
                 os.makedirs(scene_dir, exist_ok=True)
 
@@ -361,20 +464,29 @@ class PipelineService:
                     "stage": f"plan_scene_{idx}", "phase": "started",
                     "message": f"Planning scene {idx + 1}/{len(scene_scripts)}...",
                 })
-                with _suppress_pipeline_output():
-                    await sp.plan_text_artifacts(
-                        script=script_text,
-                        user_requirement=request.user_requirement,
-                        style=request.style,
-                        characters=characters,
-                        progress=self._ws_progress_callback(session_id),
-                        quiet=True,
+                with _capture_pipeline_output():
+                    await asyncio.wait_for(
+                        sp.plan_text_artifacts(
+                            script=script_text,
+                            user_requirement=request.user_requirement,
+                            style=request.style,
+                            characters=characters,
+                            progress=self._ws_progress_callback(session_id),
+                            quiet=True,
+                        ),
+                        timeout=_STEP_TIMEOUT_SCENE_PLAN,
                     )
                 await self._broadcast_ws(session_id, {
                     "type": "artifact_ready", "session_id": session_id,
                     "path": f"idea2video/scene_{idx}/storyboard.json",
                     "url": f"/api/files/{session_id}/idea2video/scene_{idx}/storyboard.json",
                 })
+                return idx
+
+            await asyncio.gather(*[
+                _plan_scene(idx, scene_script)
+                for idx, scene_script in enumerate(scene_scripts)
+            ])
 
             self._session_index.update_stage(session_id, "narrative_planned", "Planning complete")
             await self._broadcast_ws(session_id, {
@@ -389,9 +501,17 @@ class PipelineService:
                 "type": "pipeline_error", "session_id": session_id,
                 "error": "Planning was cancelled",
             })
+        except asyncio.TimeoutError:
+            logger.exception("Planning timed out for session %s", session_id)
+            friendly = "规划超时 — AI 服务响应过慢，请重试或缩短创意描述"
+            self._session_index.update_stage(session_id, "error", friendly)
+            await self._broadcast_ws(session_id, {
+                "type": "pipeline_error", "session_id": session_id,
+                "error": friendly,
+            })
         except Exception as exc:
             logger.exception("Planning failed for session %s", session_id)
-            friendly = f"规划失败: {str(exc)[:200]}"
+            friendly = f"规划失败: {_friendly_error(exc)}"
             self._session_index.update_stage(session_id, "error", friendly)
             await self._broadcast_ws(session_id, {
                 "type": "pipeline_error", "session_id": session_id,
@@ -428,7 +548,7 @@ class PipelineService:
         try:
             self._session_index.update_stage(session_id, "rendering", "Rendering started")
 
-            chat_model = self._build_chat_model()
+            chat_model = self._build_chat_model(multimodal=True)
             image_gen = self._build_image_generator()
             video_gen = self._build_video_generator()
             working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
@@ -461,11 +581,14 @@ class PipelineService:
             })
             session = self._session_index.get(session_id)
             style_val = (session or {}).get("style", "")
-            with _suppress_pipeline_output():
-                await pipeline.generate_character_portraits(
-                    characters=characters,
-                    character_portraits_registry=None,
-                    style=style_val,
+            with _capture_pipeline_output():
+                character_portraits_registry = await asyncio.wait_for(
+                    pipeline.generate_character_portraits(
+                        characters=characters,
+                        character_portraits_registry=None,
+                        style=style_val,
+                    ),
+                    timeout=_STEP_TIMEOUT_CHARACTERS,
                 )
             for c in characters:
                 for view in ["front", "side", "back"]:
@@ -494,6 +617,11 @@ class PipelineService:
             with open(script_path, "r") as f:
                 scene_scripts = json.load(f)
 
+            # Read session data once before scene loop (avoid repeated disk I/O)
+            session_data = self._session_index.get(session_id) or {}
+            user_req = session_data.get("user_requirement", "")
+            style_val2 = session_data.get("style", "")
+
             # Render each scene
             for idx, scene_script in enumerate(scene_scripts):
                 if cancel_evt.is_set():
@@ -514,15 +642,18 @@ class PipelineService:
                     "stage": f"render_scene_{idx}", "phase": "started",
                     "message": f"Rendering scene {idx + 1}/{len(scene_scripts)}...",
                 })
-                with _suppress_pipeline_output():
-                    session_data = self._session_index.get(session_id) or {}
-                    await sp(
-                        script=script_text,
-                        user_requirement=session_data.get("user_requirement", ""),
-                        style=session_data.get("style", ""),
-                        characters=characters,
-                        progress=self._ws_progress_callback(session_id),
-                        quiet=True,
+                with _capture_pipeline_output():
+                    await asyncio.wait_for(
+                        sp(
+                            script=script_text,
+                            user_requirement=user_req,
+                            style=style_val2,
+                            characters=characters,
+                            character_portraits_registry=character_portraits_registry,
+                            progress=self._ws_progress_callback(session_id),
+                            quiet=True,
+                        ),
+                        timeout=_STEP_TIMEOUT_SCENE_RENDER,
                     )
 
             # Final video exists check
@@ -551,9 +682,17 @@ class PipelineService:
                 "type": "pipeline_error", "session_id": session_id,
                 "error": "Rendering was cancelled",
             })
+        except asyncio.TimeoutError:
+            logger.exception("Rendering timed out for session %s", session_id)
+            friendly = "渲染超时 — AI 服务响应过慢，请重试或减少镜头数"
+            self._session_index.update_stage(session_id, "error", friendly)
+            await self._broadcast_ws(session_id, {
+                "type": "pipeline_error", "session_id": session_id,
+                "error": friendly,
+            })
         except Exception as exc:
             logger.exception("Rendering failed for session %s", session_id)
-            friendly = f"渲染失败: {str(exc)[:200]}"
+            friendly = f"渲染失败: {_friendly_error(exc)}"
             self._session_index.update_stage(session_id, "error", friendly)
             await self._broadcast_ws(session_id, {
                 "type": "pipeline_error", "session_id": session_id,
@@ -595,6 +734,10 @@ class PipelineService:
         if session_id not in self._cancel_events:
             return {"cancelled": False, "error": f"No pipeline running for session {session_id}"}
         self._cancel_events[session_id].set()
+        # Also cancel the asyncio.Task to propagate CancelledError immediately
+        task = self._tasks.get(session_id)
+        if task and not task.done():
+            task.cancel()
         return {"cancelled": True, "session_id": session_id}
 
     # ── Cleanup ───────────────────────────────────────────────────────
@@ -602,3 +745,4 @@ class PipelineService:
     def _cleanup(self, session_id: str) -> None:
         self._tasks.pop(session_id, None)
         self._cancel_events.pop(session_id, None)
+        self._ws_connections.pop(session_id, None)
