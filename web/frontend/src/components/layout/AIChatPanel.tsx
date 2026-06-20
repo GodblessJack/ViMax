@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Send, Film, Wand2 } from 'lucide-react'
+import { Wand2 } from 'lucide-react'
 import type { WizardStep } from '@/lib/types'
 import type { ChatMessage as StoreChatMessage, AgentSuggestion } from '@/stores/types'
 import { PRESET_STYLES } from '@/lib/constants'
 import { ChatMessage, TypingIndicator } from '@/components/ui/ChatMessage'
+import { ChatInput, SuggestionBar, QuickActions } from '@/components/layout/chat'
 
 function styleDisplayName(key: string): string {
   const found = PRESET_STYLES.find(s => s.key === key)
@@ -260,137 +261,64 @@ export default function AIChatPanel({
 
         {/* Quick reply chips — style selection */}
         {step === 1 && ideaConfirmed && !styleConfirmed && (
-          <div className="flex flex-wrap gap-1.5 px-1 pb-4">
-            {PRESET_STYLES.map(s => (
-              <button
-                key={s.key}
-                onClick={() => {
-                  setMessages(prev => [
-                    ...prev,
-                    { role: 'user', text: `${s.emoji} ${s.name}` },
-                    { role: 'ai', text: `好的！风格确认为 **${s.emoji} ${s.name}** 🎬\n\n一切就绪！确认开始 AI 规划吗？` },
-                  ])
-                  onStyleExtracted(s.key)
-                  setStyleConfirmed(true)
-                }}
-                className="inline-flex items-center gap-1 rounded-full border bg-card px-3 py-1.5 text-xs hover:border-primary hover:bg-primary-light transition-all active:scale-95"
-              >
-                <span>{s.emoji}</span>
-                <span>{s.name}</span>
-              </button>
-            ))}
-          </div>
+          <QuickActions
+            showStylePicker
+            onStyleSelect={(styleKey) => {
+              const style = PRESET_STYLES.find((s) => s.key === styleKey)
+              if (!style) return
+              setMessages((prev) => [
+                ...prev,
+                { role: 'user', text: `${style.emoji} ${style.name}` },
+                { role: 'ai', text: `好的！风格确认为 **${style.emoji} ${style.name}** 🎬\n\n一切就绪！确认开始 AI 规划吗？` },
+              ])
+              onStyleExtracted(styleKey)
+              setStyleConfirmed(true)
+            }}
+          />
         )}
 
         {/* Quick reply chips — confirm to start */}
         {step === 1 && ideaConfirmed && styleConfirmed && (
-          <div className="flex gap-1.5 px-1 pb-4">
-            <button
-              onClick={() => {
-                setMessages(prev => [...prev, { role: 'system', text: '🚀 AI 开始规划中...' }])
-                onStartPlanning()
-              }}
-              className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary-light text-primary px-3 py-1.5 text-xs font-medium hover:bg-primary hover:text-primary-foreground transition-all active:scale-95"
-            >
-              <Film className="h-3 w-3" />
-              开始规划
-            </button>
-            <button
-              onClick={() => {
-                setIdeaConfirmed(false)
-                setStyleConfirmed(false)
-                onIdeaExtracted('')
-                onStyleExtracted('')
-                setMessages(prev => [...prev,
-                  { role: 'user', text: '我想换个创意' },
-                  { role: 'ai', text: '没问题！请重新描述你想拍的短剧创意 🎬' },
-                ])
-              }}
-              className="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-all active:scale-95"
-            >
-              重新描述
-            </button>
-          </div>
+          <QuickActions
+            showStartPlanning
+            onStartPlanning={() => {
+              setMessages((prev) => [...prev, { role: 'system', text: '🚀 AI 开始规划中...' }])
+              onStartPlanning()
+            }}
+            onRestartIdea={() => {
+              setIdeaConfirmed(false)
+              setStyleConfirmed(false)
+              onIdeaExtracted('')
+              onStyleExtracted('')
+              setMessages((prev) => [
+                ...prev,
+                { role: 'user', text: '我想换个创意' },
+                { role: 'ai', text: '没问题！请重新描述你想拍的短剧创意 🎬' },
+              ])
+            }}
+          />
         )}
 
-        {/* Start planning button — shows when both idea and style confirmed in Step 1 */}
-        {step === 1 && ideaConfirmed && styleConfirmed && (
-          <div className="text-center pt-2">
-            <button
-              onClick={() => {
-                setMessages(prev => [...prev, { role: 'system', text: '🚀 AI 开始规划中...' }])
-                onStartPlanning()
-              }}
-              className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:brightness-90 transition-all shadow-sm hover:shadow-md active:scale-[0.98]"
-            >
-              <Film className="h-4 w-4" />
-              开始 AI 规划
-            </button>
-          </div>
-        )}
-
-        {/* ── NEW: Agent suggestions from store (additive alongside existing UI) ── */}
-        {storeAgentSuggestions && storeAgentSuggestions.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 px-1 py-2 border-t border-border/40 pt-3 mt-2">
-            {storeAgentSuggestions
-              .filter((s) => !s.dismissed)
-              .slice(0, 3)
-              .map((suggestion) => (
-                <div
-                  key={suggestion.id}
-                  className="flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-xs text-muted-foreground"
-                >
-                  <span>
-                    {suggestion.type === 'warning' ? '⚠️' : suggestion.type === 'tip' ? '💡' : suggestion.type === 'question' ? '❓' : '🎯'}
-                  </span>
-                  <span>{suggestion.message}</span>
-                  {suggestion.action && (
-                    <button
-                      onClick={() => {
-                        // Dismiss locally — actual action handled by parent via WS
-                      }}
-                      className="ml-1 rounded-md bg-primary-light text-primary px-2 py-0.5 text-[10px] font-medium hover:bg-primary hover:text-primary-foreground transition-colors"
-                    >
-                      {suggestion.action.label}
-                    </button>
-                  )}
-                </div>
-              ))}
-          </div>
-        )}
+        {/* Agent suggestions from store */}
+        <SuggestionBar
+          suggestions={storeAgentSuggestions ?? []}
+        />
 
         <div ref={bottomRef} />
       </div>
 
       {/* Input — always visible */}
-      <form
-        onSubmit={e => { e.preventDefault(); send() }}
-        className="p-4 border-t bg-sidebar/80 backdrop-blur-sm shrink-0"
-      >
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            aria-label="输入消息"
-            placeholder={
-              step === 1 && !ideaConfirmed ? '描述你的创意...' :
-              step === 1 && !styleConfirmed ? '描述你想要的风格...' :
-              '输入你的问题或修改意见...'
-            }
-            className="flex-1 rounded-xl border bg-background px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-ring transition-all placeholder:text-muted-foreground/50"
-            autoFocus
-          />
-          <button
-            type="submit"
-            disabled={!input.trim() || sending}
-            aria-label="发送消息"
-            className="rounded-xl bg-primary px-3.5 py-2.5 text-primary-foreground hover:brightness-90 disabled:opacity-40 transition-all shrink-0"
-          >
-            <Send className="h-4 w-4" />
-          </button>
-        </div>
-      </form>
+      <ChatInput
+        value={input}
+        onChange={setInput}
+        onSend={send}
+        sending={sending}
+        placeholder={
+          step === 1 && !ideaConfirmed ? '描述你的创意...' :
+          step === 1 && !styleConfirmed ? '描述你想要的风格...' :
+          '输入你的问题或修改意见...'
+        }
+      />
     </aside>
   )
 }
