@@ -31,26 +31,39 @@ export default function CreateDramaPage() {
   // WebSocket connection — dispatches events into the store
   useSessionWebSocket(sessionId)
 
-  // Start planning: call /start-workflow REST endpoint (session + workflow in one call)
+  // Start planning: create session, wait for WS, then start workflow
   const handleStartPlanning = useCallback(async () => {
     if (!idea) return
     setLoading(true)
     try {
-      const resp = await request<{ session_id: string; stage: string }>(
-        '/pipeline/start-workflow',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            idea,
-            style: style || 'wuxia',
-            user_requirement: '',
-          }),
-        },
+      // Step 1: create session
+      const createResp = await request<{ session_id: string }>(
+        '/sessions',
+        { method: 'POST', body: JSON.stringify({ idea, style: style || 'wuxia', user_requirement: '' }) },
       )
-      const sid = resp.session_id
+      const sid = createResp.session_id
       setSessionId(sid)
       setWizardStep(2)
-      logger.info('Workflow started via REST', { sessionId: sid })
+
+      // Step 2: wait for WS connection
+      await new Promise<void>((resolve) => {
+        const check = () => {
+          const state = useWorkflowStore.getState()
+          if (state.connectionState === 'connected' && state.sessionId === sid) {
+            resolve()
+          } else {
+            setTimeout(check, 200)
+          }
+        }
+        check()
+      })
+
+      // Step 3: start workflow via REST (WS is listening now)
+      await request('/pipeline/start-workflow', {
+        method: 'POST',
+        body: JSON.stringify({ idea, style: style || 'wuxia', user_requirement: '', session_id: sid }),
+      })
+      logger.info('Workflow started', { sessionId: sid })
     } catch (err) {
       logger.error('Failed to start planning', err)
     } finally {
