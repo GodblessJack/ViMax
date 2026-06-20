@@ -20,7 +20,7 @@ export function StepActions({ step }: { step: WorkflowStep }) {
   return (
     <div className="step-actions flex items-center justify-center gap-3 p-4 border-t">
       {/* Previous step */}
-      {currentStepIndex > 0 && (
+      {(currentStepIndex > 0 || isError) && (
         <button
           onClick={prevStep}
           className="px-4 py-2 text-sm rounded-lg border hover:bg-muted transition-colors"
@@ -63,6 +63,22 @@ export function StepActions({ step }: { step: WorkflowStep }) {
           className="px-4 py-2 text-sm rounded-lg bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
         >
           重试
+        </button>
+      )}
+
+      {/* Error skip */}
+      {isError && step.canSkip && (
+        <button
+          onClick={() => {
+            sendWsMessage({
+              type: 'user:action',
+              action: 'skip_step',
+              payload: { step: step.name },
+            })
+          }}
+          className="px-4 py-2 text-sm rounded-lg border hover:bg-muted transition-colors"
+        >
+          跳过此步骤
         </button>
       )}
 

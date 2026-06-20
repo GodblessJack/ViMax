@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { PortraitEntry } from "@/stores/types";
+import { validateArrayData } from "./validate";
 
 // PortraitResultPanel — portrait gallery with image preview
 export function PortraitResultPanel({
@@ -9,7 +10,7 @@ export function PortraitResultPanel({
   data: unknown;
   onEdit?: (path: string, value: unknown) => void;
 }) {
-  const portraits = (Array.isArray(data) ? data : []) as PortraitEntry[];
+  const portraits = validateArrayData(data, "PortraitResultPanel") as PortraitEntry[];
   const [showEditor, setShowEditor] = useState(false);
   const [editValue, setEditValue] = useState("");
 

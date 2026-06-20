@@ -8,6 +8,9 @@ export function StoryResultPanel({
   data: unknown;
   onEdit?: (path: string, value: unknown) => void;
 }) {
+  if (typeof data !== "string") {
+    console.warn(`[ViMax] StoryResultPanel: expected string, got ${typeof data}`, data)
+  }
   const text = typeof data === "string" ? data : "";
   const paragraphs = text.split("\n\n").filter(Boolean);
   const [editing, setEditing] = useState<number | null>(null);

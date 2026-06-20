@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { StoryboardScene } from "@/stores/types";
+import { validateArrayData } from "./validate";
 
 // StoryboardResultPanel — storyboard shot grid
 export function StoryboardResultPanel({
@@ -9,7 +10,7 @@ export function StoryboardResultPanel({
   data: unknown;
   onEdit?: (path: string, value: unknown) => void;
 }) {
-  const scenes = (Array.isArray(data) ? data : []) as StoryboardScene[];
+  const scenes = validateArrayData(data, "StoryboardResultPanel") as StoryboardScene[];
   const [showEditor, setShowEditor] = useState(false);
   const [editValue, setEditValue] = useState("");
 

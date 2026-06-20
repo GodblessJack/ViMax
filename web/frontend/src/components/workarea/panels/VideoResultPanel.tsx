@@ -17,6 +17,9 @@ export function VideoResultPanel({
     typeof data === "string"
       ? data
       : (data as VideoData)?.finalVideoUrl || "";
+  if (typeof data !== "string" && !(data && typeof data === "object" && "finalVideoUrl" in (data as object))) {
+    console.warn(`[ViMax] VideoResultPanel: expected string or VideoData, got ${typeof data}`, data)
+  }
   const [showEditor, setShowEditor] = useState(false);
   const [editValue, setEditValue] = useState("");
 

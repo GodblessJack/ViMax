@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { SceneScript } from "@/stores/types";
+import { validateArrayData } from "./validate";
 
 // ScriptResultPanel — scene/dialogue list
 export function ScriptResultPanel({
@@ -9,7 +10,7 @@ export function ScriptResultPanel({
   data: unknown;
   onEdit?: (path: string, value: unknown) => void;
 }) {
-  const scenes = (Array.isArray(data) ? data : []) as SceneScript[];
+  const scenes = validateArrayData(data, "ScriptResultPanel") as SceneScript[];
   const [showEditor, setShowEditor] = useState(false);
   const [editValue, setEditValue] = useState("");
 

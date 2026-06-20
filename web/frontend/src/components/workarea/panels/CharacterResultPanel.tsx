@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { CharacterInfo } from "@/stores/types";
+import { validateArrayData } from "./validate";
 
 // CharacterResultPanel — character card grid
 export function CharacterResultPanel({
@@ -9,7 +10,7 @@ export function CharacterResultPanel({
   data: unknown;
   onEdit?: (path: string, value: unknown) => void;
 }) {
-  const characters = (Array.isArray(data) ? data : []) as CharacterInfo[];
+  const characters = validateArrayData(data, "CharacterResultPanel") as CharacterInfo[];
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editField, setEditField] = useState<
     "identifier" | "static_features" | null

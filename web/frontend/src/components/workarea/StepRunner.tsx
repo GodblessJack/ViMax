@@ -5,9 +5,6 @@ import { STEP_RESULT_COMPONENTS } from './panels/index'
 
 export function StepRunner({ step }: { step: WorkflowStep }) {
   const runtime = useWorkflowStore((s) => s.runtime[step.name])
-  const requestRegenerate = useWorkflowStore((s) => s.requestRegenerate)
-  const prevStep = useWorkflowStore((s) => s.prevStep)
-  const sendWsMessage = useWorkflowStore((s) => s.sendWsMessage)
 
   if (!runtime) return null
 
@@ -17,7 +14,7 @@ export function StepRunner({ step }: { step: WorkflowStep }) {
       {runtime.phase === 'preparing' && (
         <div className="preparing-panel space-y-3">
           <div className="flex items-center gap-2 text-muted-foreground">
-            <span className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+            <span className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" role="status" aria-label="加载中" />
             <span className="font-medium">{step.label} — 准备中...</span>
           </div>
           <p className="text-sm text-muted-foreground">
@@ -51,40 +48,12 @@ export function StepRunner({ step }: { step: WorkflowStep }) {
         </div>
       )}
 
-      {/* Phase: Done — Error state with recovery actions */}
+      {/* Phase: Done — Error state (actions are in StepActions) */}
       {runtime.phase === 'done' && runtime.error && (
         <div className="result-panel space-y-3">
           <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4 text-destructive">
             <p className="font-medium">步骤执行出错</p>
             <p className="text-sm mt-1">{runtime.error}</p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => requestRegenerate(step.index)}
-              className="px-3 py-1.5 text-sm rounded-lg bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
-            >
-              🔄 重试
-            </button>
-            {step.canSkip && (
-              <button
-                onClick={() => {
-                  sendWsMessage({
-                    type: 'user:action',
-                    action: 'skip_step',
-                    payload: { step: step.name },
-                  })
-                }}
-                className="px-3 py-1.5 text-sm rounded-lg border hover:bg-muted transition-colors"
-              >
-                ⏭️ 跳过此步骤
-              </button>
-            )}
-            <button
-              onClick={prevStep}
-              className="px-3 py-1.5 text-sm rounded-lg border hover:bg-muted transition-colors"
-            >
-              ← 回退到上一步
-            </button>
           </div>
         </div>
       )}
@@ -97,7 +66,7 @@ export function StepRunner({ step }: { step: WorkflowStep }) {
             const artifactData = runtime.result?.previewData
             if (Panel !== undefined && artifactData !== undefined && artifactData !== null) {
               return (
-                <Suspense fallback={<div className="p-4 text-muted-foreground text-sm">加载结果面板...</div>}>
+                <Suspense key={step.name} fallback={<div className="p-4 text-muted-foreground text-sm">加载结果面板...</div>}>
                   {/* TODO: When editing is implemented, panels should write to local state
                       that syncs both to store.artifacts AND server via WS */}
                   <Panel data={artifactData} />
