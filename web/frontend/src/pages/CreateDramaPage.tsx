@@ -45,20 +45,25 @@ export default function CreateDramaPage() {
       setSessionId(sid)
       setWizardStep(2)
 
-      // Step 2: wait for WS connection
+      // Step 2: wait for WS connection (max 5s, then proceed anyway)
       await new Promise<void>((resolve) => {
+        let elapsed = 0
+        const maxWait = 5000
         const check = () => {
           const state = useWorkflowStore.getState()
           if (state.connectionState === 'connected' && state.sessionId === sid) {
             resolve()
+          } else if (elapsed >= maxWait) {
+            resolve() // proceed even if WS not ready
           } else {
+            elapsed += 200
             setTimeout(check, 200)
           }
         }
         check()
       })
 
-      // Step 3: start workflow via REST (WS is listening now)
+      // Step 3: start workflow via REST
       await request('/pipeline/start-workflow', {
         method: 'POST',
         body: JSON.stringify({ idea, style: style || 'wuxia', user_requirement: '', session_id: sid }),
