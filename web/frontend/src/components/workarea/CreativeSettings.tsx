@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Film, Monitor, Smartphone, AspectRatio } from 'lucide-react'
+import { Film, Monitor, Smartphone, Layout } from 'lucide-react'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { PRESET_STYLES } from '@/lib/constants'
 
@@ -67,7 +67,7 @@ export function CreativeSettings() {
       {/* 画面比例 */}
       <div className="space-y-2">
         <label className="text-sm font-medium">
-          <AspectRatio className="w-3.5 h-3.5 inline mr-1" />
+          <Layout className="w-3.5 h-3.5 inline mr-1" />
           画面比例
         </label>
         <div className="grid grid-cols-3 gap-2">
