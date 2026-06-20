@@ -195,6 +195,23 @@ class AgentService:
             "reply": reply,
         })
 
+    async def handle_suggestion_reply(
+        self,
+        session_id: str,
+        reply_text: str,
+    ) -> None:
+        """Handle a suggestion chip click -- resumes the confirmation gate with the text.
+
+        When a user clicks a suggestion chip in the chat panel, the text is sent via
+        user:message. If the Agent is waiting on an ask_user confirmation gate, this
+        resumes it with the suggestion text as the reply.
+        """
+        self._confirmation_gate.resume(session_id, {
+            "action": "confirm",
+            "payload": {},
+            "reply": reply_text,
+        })
+
     # ── Conversation management ─────────────────────────────────────────
 
     def _get_or_create_conversation(self, session_id: str) -> list[dict[str, Any]]:

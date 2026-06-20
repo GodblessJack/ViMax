@@ -100,7 +100,7 @@ export default function CreateDramaPage() {
   // alongside the existing usePipelineWebSocket. The new hook dispatches to the
   // store (via handleWsEvent / handleSessionEvent), while the old hook continues
   // to provide events for Step4Generation component compatibility.
-  useSessionWebSocket(sessionId)
+  const wsSession = useSessionWebSocket(sessionId)
 
   // One-way sync: existing useState -> WorkflowStore
   // This keeps useState as the source of truth while making data
@@ -432,6 +432,18 @@ export default function CreateDramaPage() {
     }
   }, [sessionId, step, idea, story, characters])
 
+  // ── WS Send via store (additive alongside HTTP chat) ──────────────
+  // For AIChatPanel: send WS messages AND keep existing HTTP chat as fallback
+  const handleSendWsMessage = useCallback((message: string) => {
+    wsSession.sendMessage(message)
+    // Also send via existing HTTP for backward compat
+    handleSendChatMessage(message)
+  }, [wsSession, handleSendChatMessage])
+
+  // ── Store selectors for AIChatPanel (atomic to avoid re-renders) ──
+  const chatMessages = useWorkflowStore((s) => s.chatMessages)
+  const agentSuggestions = useWorkflowStore((s) => s.agentSuggestions)
+
   const isComplete = events.some(e => e.type === 'pipeline_complete')
 
   const handleStepClick = useCallback((s: WizardStep) => {
@@ -549,6 +561,9 @@ export default function CreateDramaPage() {
         onStyleExtracted={(v) => { setStyle(v); setAiExtractedStyle(v) }}
         onStartPlanning={handleStartPlanning}
         onSendMessage={handleSendChatMessage}
+        storeChatMessages={chatMessages}
+        storeAgentSuggestions={agentSuggestions}
+        onWSSendMessage={handleSendWsMessage}
       />
       </div>
     </div>

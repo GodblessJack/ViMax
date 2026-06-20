@@ -7,7 +7,7 @@
 // until the legacy page is fully migrated.
 
 import { create } from 'zustand'
-import type { WorkflowStepName, StepRuntime, StepResult, StepStatus, WizardStep, WsServerEvent } from '@/stores/types'
+import type { WorkflowStepName, StepRuntime, StepResult, StepStatus, WizardStep, WsServerEvent, ChatMessage, AgentSuggestion, PendingConfirmation } from '@/stores/types'
 import { WORKFLOW_STEPS } from '@/stores/types'
 import { logger } from '@/lib/logger'
 
@@ -74,6 +74,18 @@ export interface WorkflowState {
 
   // ── Artifacts ───────────────────────────────────────────────────
   finalVideoUrl: string | null
+
+  // ── Chat ────────────────────────────────────────────────────────
+  chatMessages: ChatMessage[]
+
+  // ── Pending Confirmations ───────────────────────────────────────
+  pendingConfirmations: PendingConfirmation[]
+
+  // ── Agent Suggestions ───────────────────────────────────────────
+  agentSuggestions: AgentSuggestion[]
+
+  // ── Artifact Cache ──────────────────────────────────────────────
+  artifacts: Record<string, unknown>
 }
 
 // ── Store Actions ───────────────────────────────────────────────────
@@ -126,10 +138,37 @@ export interface WorkflowActions {
   // Artifacts
   setFinalVideoUrl: (url: string | null) => void
 
+  // Chat
+  addChatMessage: (role: ChatMessage['role'], content: string, suggestions?: AgentSuggestion[]) => void
+  clearChatMessages: () => void
+
+  // Pending Confirmations
+  setPendingConfirmation: (confirmation: PendingConfirmation | null) => void
+
+  // Agent Suggestions
+  addAgentSuggestion: (suggestion: AgentSuggestion) => void
+  dismissSuggestion: (suggestionId: string) => void
+  clearAgentSuggestions: () => void
+
+  // Artifact Cache
+  updateArtifact: (key: string, content: unknown) => void
+
+  // Convenience aliases (WS event wiring)
+  updateStepRuntime: (stepName: string, patch: Partial<StepRuntime>) => void
+  appendStreamedOutput: (stepName: string, chunk: string) => void
+
   // Reset
   reset: () => void
   resetIdea: () => void
   resetGeneration: () => void
+}
+
+// ── ID generator ──────────────────────────────────────────────────────
+
+let _msgCounter = 0
+function _nextMsgId(): string {
+  _msgCounter++
+  return `msg_${Date.now()}_${_msgCounter}`
 }
 
 // ── Default Runtime factory ─────────────────────────────────────────
@@ -176,6 +215,10 @@ const initialState: WorkflowState = {
   connectionState: 'disconnected',
   events: [],
   finalVideoUrl: null,
+  chatMessages: [],
+  pendingConfirmations: [],
+  agentSuggestions: [],
+  artifacts: {},
 }
 
 // ── Store ───────────────────────────────────────────────────────────
@@ -363,17 +406,40 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
         break
       }
       case 'step:need_confirm': {
-        // Pending confirmation — caller uses runtime state
         get().setRuntimePhase(event.step, 'running')
+        get().setPendingConfirmation({
+          stepIndex: get().steps.find((s) => s.name === event.step)?.index ?? 0,
+          stepName: event.step,
+          message: event.message,
+          suggestions: event.suggestions,
+          timestamp: Date.now(),
+        })
         break
       }
       case 'artifact:updated': {
         logger.debug('workflowStore: artifact updated', { key: event.artifact_key })
+        get().updateArtifact(event.artifact_key, event.content)
         break
       }
       case 'agent:message': {
-        // Agent messages handled by chat panel
         logger.debug('workflowStore: agent message', event.content.slice(0, 80))
+        get().addChatMessage('agent', event.content, event.suggestions)
+        // Register inline suggestions from agent:message
+        if (event.suggestions) {
+          for (const suggestion of event.suggestions) {
+            get().addAgentSuggestion(suggestion)
+          }
+        }
+        break
+      }
+      case 'agent:ask': {
+        get().addChatMessage('agent', event.question, event.options?.map((opt) => ({
+          id: _nextMsgId(),
+          type: 'action' as const,
+          message: opt.label,
+          action: { label: opt.label, type: 'confirm' as const, payload: opt.value },
+          dismissed: false,
+        })))
         break
       }
       case 'pipeline:complete': {
@@ -396,6 +462,80 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
         break
     }
   },
+
+  // ── Chat ───────────────────────────────────────────────────────
+  addChatMessage: (role, content, suggestions) =>
+    set((state) => ({
+      chatMessages: [
+        ...state.chatMessages,
+        {
+          id: _nextMsgId(),
+          role,
+          content,
+          timestamp: Date.now(),
+          suggestions: suggestions ?? [],
+        },
+      ],
+    })),
+
+  clearChatMessages: () => set({ chatMessages: [] }),
+
+  // ── Pending Confirmations ──────────────────────────────────────
+  setPendingConfirmation: (confirmation) =>
+    set((state) => ({
+      pendingConfirmations: confirmation
+        ? [...state.pendingConfirmations, confirmation]
+        : [],
+    })),
+
+  // ── Agent Suggestions ──────────────────────────────────────────
+  addAgentSuggestion: (suggestion) =>
+    set((state) => ({
+      agentSuggestions: [...state.agentSuggestions, suggestion],
+    })),
+
+  dismissSuggestion: (suggestionId) =>
+    set((state) => ({
+      agentSuggestions: state.agentSuggestions.map((s) =>
+        s.id === suggestionId ? { ...s, dismissed: true } : s
+      ),
+    })),
+
+  clearAgentSuggestions: () => set({ agentSuggestions: [] }),
+
+  // ── Artifact Cache ─────────────────────────────────────────────
+  updateArtifact: (key, content) =>
+    set((state) => ({
+      artifacts: { ...state.artifacts, [key]: content },
+    })),
+
+  // ── Convenience aliases ────────────────────────────────────────
+  updateStepRuntime: (stepName, patch) =>
+    set((state) => {
+      const existing = state.runtime[stepName]
+      if (!existing) return state
+      return {
+        runtime: {
+          ...state.runtime,
+          [stepName]: { ...existing, ...patch },
+        },
+      }
+    }),
+
+  appendStreamedOutput: (stepName, chunk) =>
+    set((state) => {
+      const existing = state.runtime[stepName]
+      if (!existing) return state
+      return {
+        runtime: {
+          ...state.runtime,
+          [stepName]: {
+            ...existing,
+            streamedOutput: existing.streamedOutput + chunk,
+          },
+        },
+      }
+    }),
 
   // ── Artifacts ──────────────────────────────────────────────────
   setFinalVideoUrl: (url) => set({ finalVideoUrl: url }),

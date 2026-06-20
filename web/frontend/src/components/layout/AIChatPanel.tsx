@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { Send, Film, Wand2 } from 'lucide-react'
 import type { WizardStep } from '@/lib/types'
-import { PRESET_STYLES } from '@/components/wizard/Step1IdeaInput'
+import type { ChatMessage as StoreChatMessage, AgentSuggestion } from '@/stores/types'
+import { PRESET_STYLES } from '@/lib/constants'
 import { ChatMessage, TypingIndicator } from '@/components/ui/ChatMessage'
 
 function styleDisplayName(key: string): string {
@@ -25,6 +26,10 @@ type AIChatPanelProps = {
   characterCount?: number
   sceneCount?: number
   totalShots?: number
+  /* ── NEW: Store wiring (additive alongside existing props) ── */
+  storeChatMessages?: StoreChatMessage[]
+  storeAgentSuggestions?: AgentSuggestion[]
+  onWSSendMessage?: (message: string) => void
 }
 
 function buildGreeting(step: WizardStep, ctx: {
@@ -69,10 +74,10 @@ function extractStyle(text: string): string | null {
 }
 
 export default function AIChatPanel({
-  step, sessionId, idea, style,
-  onIdeaExtracted, onStyleExtracted, onStartPlanning,
+  step, onIdeaExtracted, onStyleExtracted, onStartPlanning,
   onSendMessage,
   storyChars, characterCount, sceneCount, totalShots,
+  storeChatMessages, storeAgentSuggestions, onWSSendMessage,
 }: AIChatPanelProps) {
   const greeting = buildGreeting(1, {})
   const [messages, setMessages] = useState<Message[]>(() => [
@@ -80,32 +85,54 @@ export default function AIChatPanel({
   ])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
-  const [ideaConfirmed, setIdeaConfirmed] = useState(false)
-  const [styleConfirmed, setStyleConfirmed] = useState(false)
+  const [ideaConfirmed, setIdeaConfirmed] = useState(step > 1)
+  const [styleConfirmed, setStyleConfirmed] = useState(step > 1)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const prevStepRef = useRef(step)
 
   // Scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Track step changes to add context-aware greetings
-  const prevStepRef = useRef(step)
   // Refs for latest context data (avoid triggering effect on data changes)
   const ctxRef = useRef({ storyChars, characterCount, sceneCount, totalShots })
-  ctxRef.current = { storyChars, characterCount, sceneCount, totalShots }
 
   useEffect(() => {
-    if (step !== prevStepRef.current) {
-      prevStepRef.current = step
-      if (step > 1) {
-        setIdeaConfirmed(true)
-        setStyleConfirmed(true)
-        // Use latest context data from ref (may be partial during async loading)
-        const greeting = buildGreeting(step, ctxRef.current)
-        setMessages(prev => [...prev, { role: 'ai', text: greeting }])
+    ctxRef.current = { storyChars, characterCount, sceneCount, totalShots }
+  }, [storyChars, characterCount, sceneCount, totalShots])
+
+  // ── NEW: Merge store chat messages alongside local messages ──
+  // Store messages (from agent WS events) are appended after local messages.
+  // Local messages preserve the Step 1 UX flow (idea/style extraction).
+  const allMessages = useMemo(() => {
+    const merged: { role: 'user' | 'ai' | 'system'; text: string; id?: string; isStore?: boolean }[] = [...messages]
+    if (storeChatMessages && storeChatMessages.length > 0) {
+      // Add store-originated agent messages that aren't already in local messages
+      for (const sm of storeChatMessages) {
+        const alreadyPresent = merged.some(
+          (m) => m.text === sm.content && m.role === (sm.role === 'agent' ? 'ai' : sm.role)
+        )
+        if (!alreadyPresent) {
+          merged.push({
+            role: sm.role === 'agent' ? 'ai' : sm.role === 'system' ? 'system' : 'user',
+            text: sm.content,
+            id: sm.id,
+            isStore: true,
+          })
+        }
       }
     }
+    return merged
+  }, [messages, storeChatMessages])
+
+  // Add context-aware greetings when step advances
+  useEffect(() => {
+    if (step !== prevStepRef.current && step > 1) {
+      const greeting = buildGreeting(step, ctxRef.current)
+      setMessages(prev => [...prev, { role: 'ai', text: greeting }])
+    }
+    prevStepRef.current = step
   }, [step])
 
   // Extract idea from user message (simple heuristic: first substantial message = idea)
@@ -126,6 +153,11 @@ export default function AIChatPanel({
     setInput('')
     setMessages(prev => [...prev, { role: 'user', text: userMsg }])
     setSending(true)
+
+    // ── NEW: Also send via WS when available ──
+    if (onWSSendMessage) {
+      onWSSendMessage(userMsg)
+    }
 
     try {
       // ── Step 1 logic: extract idea and style from conversation ──
@@ -220,8 +252,8 @@ export default function AIChatPanel({
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.map((m, i) => (
-          <ChatMessage key={i} role={m.role} text={m.text} />
+        {allMessages.map((m, i) => (
+          <ChatMessage key={m.id ?? i} role={m.role} text={m.text} />
         ))}
 
         {sending && <TypingIndicator />}
@@ -289,11 +321,41 @@ export default function AIChatPanel({
                 setMessages(prev => [...prev, { role: 'system', text: '🚀 AI 开始规划中...' }])
                 onStartPlanning()
               }}
-              className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:bg-[#E84A4F] transition-all shadow-sm hover:shadow-md active:scale-[0.98]"
+              className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:brightness-90 transition-all shadow-sm hover:shadow-md active:scale-[0.98]"
             >
               <Film className="h-4 w-4" />
               开始 AI 规划
             </button>
+          </div>
+        )}
+
+        {/* ── NEW: Agent suggestions from store (additive alongside existing UI) ── */}
+        {storeAgentSuggestions && storeAgentSuggestions.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-1 py-2 border-t border-border/40 pt-3 mt-2">
+            {storeAgentSuggestions
+              .filter((s) => !s.dismissed)
+              .slice(0, 3)
+              .map((suggestion) => (
+                <div
+                  key={suggestion.id}
+                  className="flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-xs text-muted-foreground"
+                >
+                  <span>
+                    {suggestion.type === 'warning' ? '⚠️' : suggestion.type === 'tip' ? '💡' : suggestion.type === 'question' ? '❓' : '🎯'}
+                  </span>
+                  <span>{suggestion.message}</span>
+                  {suggestion.action && (
+                    <button
+                      onClick={() => {
+                        // Dismiss locally — actual action handled by parent via WS
+                      }}
+                      className="ml-1 rounded-md bg-primary-light text-primary px-2 py-0.5 text-[10px] font-medium hover:bg-primary hover:text-primary-foreground transition-colors"
+                    >
+                      {suggestion.action.label}
+                    </button>
+                  )}
+                </div>
+              ))}
           </div>
         )}
 
@@ -310,6 +372,7 @@ export default function AIChatPanel({
             type="text"
             value={input}
             onChange={e => setInput(e.target.value)}
+            aria-label="输入消息"
             placeholder={
               step === 1 && !ideaConfirmed ? '描述你的创意...' :
               step === 1 && !styleConfirmed ? '描述你想要的风格...' :
@@ -321,7 +384,8 @@ export default function AIChatPanel({
           <button
             type="submit"
             disabled={!input.trim() || sending}
-            className="rounded-xl bg-primary px-3.5 py-2.5 text-primary-foreground hover:bg-[#E84A4F] disabled:opacity-40 transition-all shrink-0"
+            aria-label="发送消息"
+            className="rounded-xl bg-primary px-3.5 py-2.5 text-primary-foreground hover:brightness-90 disabled:opacity-40 transition-all shrink-0"
           >
             <Send className="h-4 w-4" />
           </button>
