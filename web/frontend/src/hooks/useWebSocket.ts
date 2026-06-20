@@ -4,6 +4,10 @@ import { useWorkflowStore } from '@/stores/workflowStore'
 
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
 
+/**
+ * @deprecated Use {@link useSessionWebSocket} from `@/hooks/useSessionWebSocket` instead.
+ * This hook is no longer imported by any component and is kept only for reference.
+ */
 export function usePipelineWebSocket(sessionId: string | null) {
   const [events, setEvents] = useState<PipelineEvent[]>([])
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
