@@ -203,6 +203,7 @@ export function useSessionWebSocket(sessionId: string | null) {
   useEffect(() => {
     // Only act on sessionId transitions, not every render
     if (lastProcessedSidRef.current === sessionId) return
+    const prevSid = lastProcessedSidRef.current
     lastProcessedSidRef.current = sessionId
 
     if (!sessionId) {
@@ -221,7 +222,8 @@ export function useSessionWebSocket(sessionId: string | null) {
     }
 
     retriesRef.current = 0
-    store.reset()
+    // Only reset when switching between sessions, not on initial null→id
+    if (prevSid) store.reset()
     connect(sessionId)
 
     return () => {
