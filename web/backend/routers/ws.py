@@ -215,7 +215,23 @@ async def _handle_client_event(
         elif event_type == "user:action":
             action = payload.get("action", "")
             action_payload = payload.get("payload", {})
-            await agent_service.handle_action(session_id, action, action_payload)
+            if action == "start_workflow":
+                idea = payload.get("idea", "") or action_payload.get("idea", "")
+                style = payload.get("style", "") or action_payload.get("style", "wuxia")
+                requirement = payload.get("user_requirement", "") or action_payload.get("user_requirement", "")
+                sid = payload.get("session_id", "") or action_payload.get("session_id", "") or session_id
+                if idea and sid:
+                    await websocket.send_json({
+                        "type": "agent:workflow_started",
+                        "session_id": sid,
+                        "message": "Starting step-by-step workflow",
+                    })
+                    await agent_service.start_workflow(
+                        session_id=sid, idea=idea, style=style,
+                        user_requirement=requirement,
+                    )
+            else:
+                await agent_service.handle_action(session_id, action, action_payload)
 
         elif event_type == "user:regenerate":
             await agent_service.broadcast(session_id, {

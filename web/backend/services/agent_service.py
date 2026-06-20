@@ -18,8 +18,6 @@ import logging
 import os
 from typing import Any
 
-import anthropic
-
 from web.backend.services.confirmation_gate import ConfirmationGate
 from web.backend.services.agent_tools import (
     AVAILABLE_TOOLS,
@@ -70,13 +68,19 @@ class AgentService:
 
     # ── Anthropic client lazy-init ──────────────────────────────────────
 
-    def _get_client(self) -> anthropic.AsyncAnthropic:
+    def _get_client(self) -> Any:
         """Lazy-initialize the Anthropic client from ViMax LLM config."""
         if self._client is not None:
             return self._client
 
+        try:
+            import anthropic
+        except ImportError:
+            logger.warning("anthropic package not installed — Agent chat unavailable")
+            return None
+
         from web.backend.config import backend_config
-        from agent_runtime.config import llm_api_key, llm_base_url, llm_model
+        from agent_runtime.config import llm_api_key, llm_base_url
 
         root = str(backend_config.vi_max_root)
         api_key = llm_api_key(root)
@@ -129,6 +133,8 @@ class AgentService:
         """
         try:
             client = self._get_client()
+            if client is None:
+                return {"reply": "Agent chat requires the anthropic Python package."}
             conversation = self._get_or_create_conversation(session_id)
 
             conversation.append({"role": "user", "content": message})
@@ -277,9 +283,226 @@ class AgentService:
 
     # ── Cleanup ─────────────────────────────────────────────────────────
 
+    @property
+    def confirmation_gate(self) -> ConfirmationGate:
+        return self._confirmation_gate
+
     def cleanup_session(self, session_id: str) -> None:
         """Release all resources for a session."""
         self._conversations.pop(session_id, None)
         self._confirmation_gate.cancel(session_id)
         self._ws_callbacks.pop(session_id, None)
         self._agent_tasks.pop(session_id, None)
+
+    # ── Step-by-step workflow orchestrator ─────────────────────────────
+
+    async def start_workflow(
+        self,
+        session_id: str,
+        idea: str,
+        style: str = "wuxia",
+        user_requirement: str = "",
+    ) -> None:
+        """Run the full pipeline step by step, pausing for confirmation after each.
+
+        Each step: prepare → execute → show result → request confirmation → wait.
+        The frontend drives progression via user:confirm / user:modify WS events.
+        """
+        import asyncio
+
+        task = asyncio.create_task(
+            self._run_workflow_steps(session_id, idea, style, user_requirement)
+        )
+        self._agent_tasks[session_id] = task
+
+    async def _run_workflow_steps(
+        self,
+        session_id: str,
+        idea: str,
+        style: str,
+        user_requirement: str,
+    ) -> None:
+        """Internal: execute pipeline steps one at a time with confirmation gates."""
+        from web.backend.main import get_pipeline_service, get_session_service
+
+        try:
+            psvc = get_pipeline_service()
+            svc = get_session_service()
+
+            # Ensure session exists and is in 'created' stage
+            detail = svc.get_session(session_id)
+            if detail is None:
+                await self.broadcast(session_id, {
+                    "type": "step:error", "step": "init",
+                    "error": "Session not found", "recoverable": False,
+                })
+                return
+
+            # Update stage
+            svc._index.update_stage(session_id, "narrative_planning", "Step-by-step planning started")
+
+            chat_model = psvc._build_chat_model()
+            dummy = psvc._build_image_generator.__self__.__class__() if False else _get_dummy_gen(psvc)
+            working_dir = str(svc._index.working_dir(session_id) / "idea2video")
+            import os
+            os.makedirs(working_dir, exist_ok=True)
+
+            from pipelines.idea2video_pipeline import Idea2VideoPipeline
+            pipeline = Idea2VideoPipeline(
+                chat_model=chat_model,
+                image_generator=dummy,
+                video_generator=dummy,
+                working_dir=working_dir,
+            )
+
+            steps = [
+                {
+                    "name": "story_generation",
+                    "label": "故事构思",
+                    "run": lambda: pipeline.develop_story(
+                        idea=idea, user_requirement=user_requirement, quiet=True,
+                    ),
+                    "artifact": "idea2video/story.txt",
+                    "timeout": 300,
+                },
+                {
+                    "name": "character_extraction",
+                    "label": "角色设计",
+                    "run": lambda: pipeline.extract_characters(
+                        story=story_text, quiet=True,
+                    ),
+                    "artifact": "idea2video/characters.json",
+                    "timeout": 300,
+                },
+                {
+                    "name": "script_writing",
+                    "label": "剧本写作",
+                    "run": lambda: pipeline.write_script_based_on_story(
+                        story=story_text, user_requirement=user_requirement, quiet=True,
+                    ),
+                    "artifact": "idea2video/script.json",
+                    "timeout": 300,
+                },
+            ]
+
+            story_text = ""
+
+            for step in steps:
+                # Broadcast preparing
+                await self.broadcast(session_id, {
+                    "type": "step:preparing",
+                    "step": step["name"],
+                    "context": {"idea": idea[:200], "style": style},
+                })
+
+                # Broadcast running
+                await self.broadcast(session_id, {
+                    "type": "step:running",
+                    "step": step["name"],
+                    "progress_percent": 0,
+                    "progress_message": f"正在{step['label']}...",
+                })
+
+                # Execute step
+                try:
+                    result = await asyncio.wait_for(
+                        step["run"](),
+                        timeout=step["timeout"],
+                    )
+                except asyncio.TimeoutError:
+                    await self.broadcast(session_id, {
+                        "type": "step:error",
+                        "step": step["name"],
+                        "error": f"{step['label']}超时，请重试",
+                        "recoverable": True,
+                    })
+                    return
+                except Exception as exc:
+                    await self.broadcast(session_id, {
+                        "type": "step:error",
+                        "step": step["name"],
+                        "error": f"{step['label']}失败: {exc}",
+                        "recoverable": True,
+                    })
+                    return
+
+                # Store story for next steps
+                if step["name"] == "story_generation":
+                    story_text = result if isinstance(result, str) else str(result)
+
+                # Broadcast completed
+                await self.broadcast(session_id, {
+                    "type": "step:completed",
+                    "step": step["name"],
+                    "result": {
+                        "summary": f"{step['label']}完成",
+                        "artifactPaths": [step["artifact"]],
+                        "previewData": result[:500] if isinstance(result, str) else None,
+                        "editableFields": [],
+                    },
+                })
+
+                # Request confirmation
+                await self.broadcast(session_id, {
+                    "type": "step:need_confirm",
+                    "step": step["name"],
+                    "message": f"{step['label']}已完成，请审阅确认后进入下一步",
+                    "suggestions": ["确认", "重新生成", "需要修改"],
+                })
+
+                # Wait for user confirmation
+                user_resp = await self._confirmation_gate.wait_for_confirmation(
+                    session_id=session_id,
+                    prompt=f"{step['label']}已完成，请确认",
+                    timeout=1800.0,
+                )
+
+                if user_resp.get("action") == "modify":
+                    # User wants modification — broadcast and wait again
+                    await self.broadcast(session_id, {
+                        "type": "agent:message",
+                        "content": f"收到修改意见: {user_resp.get('reply', '')}",
+                    })
+                    # Re-run confirmation
+                    await self.broadcast(session_id, {
+                        "type": "step:need_confirm",
+                        "step": step["name"],
+                        "message": "修改后请确认是否满意",
+                        "suggestions": ["确认", "继续修改"],
+                    })
+                    user_resp = await self._confirmation_gate.wait_for_confirmation(
+                        session_id=session_id,
+                        prompt="请确认",
+                        timeout=1800.0,
+                    )
+
+                if user_resp.get("action") == "cancelled":
+                    svc._index.update_stage(session_id, "cancelled", "用户取消")
+                    return
+
+            # All steps done
+            svc._index.update_stage(session_id, "narrative_planned", "Step-by-step planning complete")
+            await self.broadcast(session_id, {
+                "type": "pipeline:complete",
+                "stage": "narrative_planned",
+                "message": "所有步骤已完成，可以开始渲染",
+            })
+
+        except asyncio.CancelledError:
+            svc = get_session_service()
+            svc._index.update_stage(session_id, "cancelled", "Workflow cancelled")
+        except Exception as exc:
+            logger.exception("Workflow failed for session %s", session_id)
+            await self.broadcast(session_id, {
+                "type": "pipeline:error",
+                "stage": "error",
+                "error": f"工作流出错: {exc}",
+            })
+
+
+def _get_dummy_gen(psvc: Any) -> Any:
+    """Return the dummy image/video generator used during planning."""
+    class _DummyGen:
+        async def generate(self, *args: Any, **kwargs: Any) -> Any:
+            return None
+    return _DummyGen()

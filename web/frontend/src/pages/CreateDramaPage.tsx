@@ -290,7 +290,7 @@ export default function CreateDramaPage() {
     restore()
   }, [searchParams])
 
-  // ── Step 1 → Step 2: Trigger planning with polling ────────────
+  // ── Step 1 → Step 2: Kick off step-by-step Agent workflow via WS ──
   const handleStartPlanning = useCallback(async () => {
     if (!idea.trim()) return
     clearDraft()
@@ -304,68 +304,24 @@ export default function CreateDramaPage() {
     setStoryboardScenes([])
 
     try {
+      // 1. Create session via REST (fast, returns sessionId)
       const effectiveStyle = style || 'wuxia'
       const resp = await startPlanning({ idea, user_requirement: '', style: effectiveStyle })
-      setSessionId(resp.session_id)
       const sid = resp.session_id
+      setSessionId(sid)
+      // SessionId change will trigger WS connection in useSessionWebSocket
 
-      pollRef.current = setInterval(async () => {
-        try {
-          const detail = await getSession(sid)
-          if (!mountedRef.current) return
-
-          if (detail.stage === 'narrative_planned') {
-            clearInterval(pollRef.current!)
-            if (!mountedRef.current) return
-            setLoading(false)
-
-            // Fetch story
-            if (detail.artifact_checklist?.['idea2video/story.txt']) {
-              const r = await fetch(getFileUrl(sid, 'idea2video/story.txt'))
-              if (mountedRef.current) setStory(r.ok ? await r.text() : '')
-            }
-            // Fetch characters
-            if (detail.artifact_checklist?.['idea2video/characters.json']) {
-              const r = await fetch(getFileUrl(sid, 'idea2video/characters.json'))
-              if (mountedRef.current && r.ok) setCharacters(await r.json())
-            }
-            // Fetch script
-            if (detail.artifact_checklist?.['idea2video/script.json']) {
-              const r = await fetch(getFileUrl(sid, 'idea2video/script.json'))
-              if (mountedRef.current && r.ok) {
-                const arr = await r.json()
-                setScenes(arr.map((_: string, i: number) => ({
-                  index: i, title: `Scene ${i + 1}`, shot_count: 0,
-                })))
-              }
-            }
-            // Fetch storyboard
-            if (detail.artifact_checklist?.['idea2video/scene_*/storyboard.json']) {
-              const r = await fetch(getFileUrl(sid, 'idea2video/scene_0/storyboard.json'))
-              if (mountedRef.current && r.ok) {
-                const sb = await r.json()
-                if (Array.isArray(sb) && sb.length > 0) {
-                  const mapped2 = sb.map((s: any) => { return {
-                    idx: s.idx ?? 0, cam_idx: s.cam_idx ?? 0,
-                    visual_desc: s.visual_desc ?? '', audio_desc: s.audio_desc ?? '',
-                    angle: `机位${s.cam_idx ?? 0}`,
-                  }})
-                  setStoryboardScenes([{ index: 0, title: 'Scene 1', shots: mapped2 }])
-                  setScenes(prev => prev.map((s, i) =>
-                    i === 0 ? { ...s, shot_count: sb.length } : s,
-                  ))
-                }
-              }
-            }
-          } else if (detail.stage === 'error') {
-            clearInterval(pollRef.current!)
-            if (mountedRef.current) {
-              setLoading(false)
-              setPlanError(detail.summary || 'Planning failed')
-            }
-          }
-        } catch { /* keep polling */ }
-      }, 2000)
+      // 2. After a short delay for WS to connect, send step-by-step workflow start
+      setTimeout(() => {
+        wsSession.sendEvent({
+          type: 'user:action',
+          action: 'start_workflow',
+          idea,
+          style: effectiveStyle,
+          user_requirement: '',
+          session_id: sid,
+        } as any)
+      }, 500)
     } catch (err: any) {
       if (mountedRef.current) {
         setLoading(false)

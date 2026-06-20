@@ -442,6 +442,10 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
         })))
         break
       }
+      case 'agent:workflow_started': {
+        get().setSessionId((event as any).session_id)
+        break
+      }
       case 'pipeline:complete': {
         if (event.final_video_url) {
           get().setFinalVideoUrl(event.final_video_url)
