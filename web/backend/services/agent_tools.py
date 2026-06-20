@@ -107,12 +107,12 @@ async def tool_run_step(
     """Execute a single pipeline step (planning or rendering).
 
     Supported step_name values:
-      - "develop_story"
-      - "extract_characters"
-      - "write_script"
-      - "plan_scenes"
+      - "story_generation"
+      - "character_extraction"
+      - "script_writing"
+      - "storyboard_design"
       - "character_portraits"
-      - "render_scenes"
+      - "video_rendering"
 
     Args:
         session_id: The session identifier.
@@ -127,12 +127,12 @@ async def tool_run_step(
 
     # Determine which pipeline method to call based on step_name
     pipeline_steps = {
-        "develop_story": ("planning", "develop_story"),
-        "extract_characters": ("planning", "extract_characters"),
-        "write_script": ("planning", "write_script"),
-        "plan_scenes": ("planning", "plan_scenes"),
+        "story_generation": ("planning", "story_generation"),
+        "character_extraction": ("planning", "character_extraction"),
+        "script_writing": ("planning", "script_writing"),
+        "storyboard_design": ("planning", "storyboard_design"),
         "character_portraits": ("rendering", "character_portraits"),
-        "render_scenes": ("rendering", "render_scenes"),
+        "video_rendering": ("rendering", "video_rendering"),
     }
 
     if step_name not in pipeline_steps:
@@ -468,7 +468,7 @@ def build_tool_schemas() -> list[dict[str, Any]]:
         },
         {
             "name": "run_step",
-            "description": "执行一个流水线步骤（develop_story, extract_characters, write_script, plan_scenes, character_portraits, render_scenes）",
+            "description": "执行一个流水线步骤（story_generation, character_extraction, script_writing, storyboard_design, character_portraits, video_rendering）",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -477,12 +477,12 @@ def build_tool_schemas() -> list[dict[str, Any]]:
                         "type": "string",
                         "description": "要执行的步骤名称",
                         "enum": [
-                            "develop_story",
-                            "extract_characters",
-                            "write_script",
-                            "plan_scenes",
+                            "story_generation",
+                            "character_extraction",
+                            "script_writing",
+                            "storyboard_design",
                             "character_portraits",
-                            "render_scenes",
+                            "video_rendering",
                         ],
                     },
                 },
