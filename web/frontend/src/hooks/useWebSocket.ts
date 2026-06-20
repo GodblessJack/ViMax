@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import type { PipelineEvent } from '@/lib/types'
+import { useWorkflowStore } from '@/stores/workflowStore'
 
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
 
