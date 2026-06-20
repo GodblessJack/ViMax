@@ -1,5 +1,7 @@
 from typing import List, Optional, Literal
 import asyncio
+import json
+import re
 from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt
 
@@ -9,6 +11,45 @@ from langchain_core.output_parsers import PydanticOutputParser
 from interfaces import CharacterInScene, ShotDescription, ShotBriefDescription
 
 from utils.retry import after_func
+
+
+def _extract_json(text: str) -> dict:
+    """Extract and parse JSON from LLM output, handling common formatting issues.
+
+    DeepSeek (and other open-weight models) sometimes wrap JSON in markdown fences
+    or produce output with minor formatting quirks that json.loads rejects.
+    This function tries progressively more lenient strategies.
+    """
+    text = text.strip()
+
+    # Strategy 1: strip markdown code fences, then parse
+    m = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if m:
+        text = m.group(1).strip()
+
+    # Strategy 2: try standard json.loads
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 3: remove trailing commas before closing brackets/braces (common LLM mistake)
+    cleaned = re.sub(r",\s*([}\]])", r"\1", text)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 4: find the first { and last } and try that substring
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            return json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(f"Could not parse JSON from LLM output: {text[:200]}...")
 
 
 
@@ -198,11 +239,14 @@ class StoryboardArtist:
             ('system', system_prompt_template_design_storyboard.format(format_instructions=parser.get_format_instructions())),
             ('human', human_prompt_template_design_storyboard.format(script_str=script_str, characters_str=characters_str, user_requirement_str=user_requirement_str)),
         ]
-        chain = self.chat_model | parser
-        response: StoryboardResponse = await asyncio.wait_for(
-            chain.ainvoke(messages),
+        # Two-step: get raw text, then robust-parse JSON (handles DeepSeek format quirks)
+        response_text = await asyncio.wait_for(
+            self.chat_model.ainvoke(messages),
             timeout=retry_timeout,
         )
+        raw_text = response_text.content if hasattr(response_text, "content") else str(response_text)
+        data = _extract_json(raw_text)
+        response = StoryboardResponse.model_validate(data)
         storyboard = response.storyboard
 
         return storyboard
@@ -217,29 +261,34 @@ class StoryboardArtist:
         characters: List[CharacterInScene],
         retry_timeout: int = 150,
     ) -> ShotDescription:
-        parser = PydanticOutputParser(pydantic_object=VisDescDecompositionResponse)
         prompt_template = ChatPromptTemplate.from_messages(
             [
                 ('system', system_prompt_template_decompose_visual_description),
                 ('human', human_prompt_template_decompose_visual_description),
             ]
         )
-        chain = prompt_template | self.chat_model | parser
+        # Two-step: get raw text, then robust-parse JSON (handles DeepSeek format quirks)
+        text_chain = prompt_template | self.chat_model
 
         visual_desc = shot_brief_desc.visual_desc.strip()
 
         characters_str = "\n".join([f"{char.identifier_in_scene}: (static) {char.static_features}; (dynamic) {char.dynamic_features}" for char in characters])
 
-        decomposition: VisDescDecompositionResponse = await asyncio.wait_for(
-            chain.ainvoke(
+        # Get raw LLM output as text (avoid PydanticOutputParser's fragile json.loads)
+        response_text = await asyncio.wait_for(
+            text_chain.ainvoke(
                 input={
-                    "format_instructions": parser.get_format_instructions(),
+                    "format_instructions": PydanticOutputParser(pydantic_object=VisDescDecompositionResponse).get_format_instructions(),
                     "visual_desc": visual_desc,
                     "characters_str": characters_str,
                 },
             ),
             timeout=retry_timeout,
         )
+        # response_text is an AIMessage; extract .content
+        raw_text = response_text.content if hasattr(response_text, "content") else str(response_text)
+        data = _extract_json(raw_text)
+        decomposition = VisDescDecompositionResponse.model_validate(data)
 
         validate_char_idxs(decomposition.ff_vis_char_idxs, len(characters), "ff_vis_char_idxs")
         validate_char_idxs(decomposition.lf_vis_char_idxs, len(characters), "lf_vis_char_idxs")
