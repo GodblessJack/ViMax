@@ -322,14 +322,30 @@ class AgentService:
         style: str,
         user_requirement: str,
     ) -> None:
-        """Internal: execute pipeline steps one at a time with confirmation gates."""
-        from web.backend.main import get_pipeline_service, get_session_service
+        """Internal: execute pipeline steps one at a time with confirmation gates.
+
+        Iterates over all 6 workflow steps.  For each step:
+          1. Calls tool_run_step (which delegates to PipelineService).
+          2. On error, presents retry/skip/cancel to the user via confirmation gate.
+          3. On success, waits for user confirmation before proceeding (unless last step).
+        """
+        import asyncio
+        from web.backend.services.agent_tools import tool_run_step
+        from web.backend.main import get_session_service
+
+        WORKFLOW_STEP_NAMES = [
+            "story_generation",
+            "character_extraction",
+            "script_writing",
+            "storyboard_design",
+            "character_portraits",
+            "video_rendering",
+        ]
 
         try:
-            psvc = get_pipeline_service()
             svc = get_session_service()
 
-            # Ensure session exists and is in 'created' stage
+            # Ensure session exists
             detail = svc.get_session(session_id)
             if detail is None:
                 await self.broadcast(session_id, {
@@ -338,146 +354,159 @@ class AgentService:
                 })
                 return
 
-            # Update stage
-            svc._index.update_stage(session_id, "narrative_planning", "Step-by-step planning started")
+            await self.broadcast(session_id, {
+                "type": "agent:workflow_started",
+                "session_id": session_id,
+                "message": "Starting step-by-step workflow",
+            })
             logger.info("Workflow: starting step-by-step for session %s", session_id)
 
-            logger.info("Workflow: building chat model for %s", session_id)
-            chat_model = psvc._build_chat_model()
-            logger.info("Workflow: chat model ready for %s", session_id)
-            from web.backend.services.pipeline_service import _UnavailableGenerator
-            dummy = _UnavailableGenerator()
-            working_dir = str(svc._index.working_dir(session_id) / "idea2video")
-            import os
-            os.makedirs(working_dir, exist_ok=True)
+            i = 0
+            while i < len(WORKFLOW_STEP_NAMES):
+                step_name = WORKFLOW_STEP_NAMES[i]
 
-            logger.info("Workflow: creating pipeline for %s", session_id)
-            from pipelines.idea2video_pipeline import Idea2VideoPipeline
-            pipeline = Idea2VideoPipeline(
-                chat_model=chat_model,
-                image_generator=dummy,
-                video_generator=dummy,
-                working_dir=working_dir,
-            )
-            logger.info("Workflow: pipeline ready for %s", session_id)
+                # Check session still active
+                svc = get_session_service()
+                session = svc.get_session(session_id)
+                if session is None:
+                    break
+                stage = getattr(session, "stage", "")
+                if stage == "cancelled":
+                    logger.info("Workflow: session %s cancelled, stopping", session_id)
+                    break
 
-            # Step 1: develop_story
-            step_name = "story_generation"
-            await self.broadcast(session_id, {
-                "type": "step:preparing", "step": step_name,
-                "context": {"idea": idea[:200], "style": style},
-            })
-            await self.broadcast(session_id, {
-                "type": "step:running", "step": step_name,
-                "progress_percent": 0, "progress_message": "正在构思故事...",
-            })
-            logger.info("Workflow: executing story_generation for %s", session_id)
-            story_text = await pipeline.develop_story(
-                idea=idea, user_requirement=user_requirement, quiet=True,
-            )
-            logger.info("Workflow: story_generation completed, %d chars", len(story_text))
-            await self.broadcast(session_id, {
-                "type": "step:completed", "step": step_name,
-                "result": {"summary": "故事构思完成", "artifactPaths": ["idea2video/story.txt"],
-                           "previewData": story_text[:500], "editableFields": []},
-            })
-            await self.broadcast(session_id, {
-                "type": "step:need_confirm", "step": step_name,
-                "message": "故事构思已完成，请审阅确认后进入下一步",
-                "suggestions": ["确认", "重新生成", "需要修改"],
-            })
+                # Announce step start
+                await self.broadcast(session_id, {
+                    "type": "pipeline:status",
+                    "session_id": session_id,
+                    "stage": step_name,
+                    "message": f"Starting {step_name}",
+                })
 
-            # Wait for user confirmation
-            user_resp = await self._confirmation_gate.wait_for_confirmation(
-                session_id=session_id, prompt="故事构思已完成，请确认", timeout=1800.0,
-            )
-            if user_resp.get("action") == "cancelled":
-                svc._index.update_stage(session_id, "cancelled", "用户取消")
-                return
-
-            # Step 2: extract_characters
-            step_name = "character_extraction"
-            await self.broadcast(session_id, {
-                "type": "step:preparing", "step": step_name,
-                "context": {"story_len": len(story_text)},
-            })
-            await self.broadcast(session_id, {
-                "type": "step:running", "step": step_name,
-                "progress_percent": 0, "progress_message": "正在提取角色...",
-            })
-            logger.info("Workflow: executing character_extraction for %s", session_id)
-            characters = await pipeline.extract_characters(story=story_text, quiet=True)
-            logger.info("Workflow: character_extraction completed, %d chars", len(str(characters)))
-            await self.broadcast(session_id, {
-                "type": "step:completed", "step": step_name,
-                "result": {"summary": "角色设计完成", "artifactPaths": ["idea2video/characters.json"],
-                           "previewData": str(characters)[:500], "editableFields": []},
-            })
-            await self.broadcast(session_id, {
-                "type": "step:need_confirm", "step": step_name,
-                "message": "角色设计已完成，请审阅确认后进入下一步",
-                "suggestions": ["确认", "重新生成", "需要修改"],
-            })
-
-            # Wait for user confirmation
-            user_resp = await self._confirmation_gate.wait_for_confirmation(
-                session_id=session_id, prompt="角色设计已完成，请确认", timeout=1800.0,
-            )
-            if user_resp.get("action") == "cancelled":
-                svc._index.update_stage(session_id, "cancelled", "用户取消")
-                return
-
-            # Step 3: write_script
-            step_name = "script_writing"
-            await self.broadcast(session_id, {
-                "type": "step:preparing", "step": step_name,
-                "context": {"character_count": len(characters) if isinstance(characters, list) else 0},
-            })
-            await self.broadcast(session_id, {
-                "type": "step:running", "step": step_name,
-                "progress_percent": 0, "progress_message": "正在编写剧本...",
-            })
-            logger.info("Workflow: executing script_writing for %s", session_id)
-            script = await pipeline.write_script_based_on_story(
-                story=story_text, user_requirement=user_requirement, quiet=True,
-            )
-            logger.info("Workflow: script_writing completed, %d scenes", len(script) if isinstance(script, list) else 0)
-            await self.broadcast(session_id, {
-                "type": "step:completed", "step": step_name,
-                "result": {"summary": "剧本写作完成", "artifactPaths": ["idea2video/script.json"],
-                           "previewData": str(script)[:500], "editableFields": []},
-            })
-            await self.broadcast(session_id, {
-                "type": "step:need_confirm", "step": step_name,
-                "message": "剧本写作已完成，请审阅确认后进入下一步",
-                "suggestions": ["确认", "重新生成", "需要修改"],
-            })
-
-            # Wait for user confirmation
-            user_resp = await self._confirmation_gate.wait_for_confirmation(
-                session_id=session_id, prompt="剧本写作已完成，请确认", timeout=1800.0,
-            )
-            if user_resp.get("action") == "cancelled":
-                svc._index.update_stage(session_id, "cancelled", "用户取消")
-                return
-                user_resp = await self._confirmation_gate.wait_for_confirmation(
+                # Execute the step via tool_run_step
+                result = await tool_run_step(
                     session_id=session_id,
-                    prompt=f"{step['label']}已完成，请确认",
-                    timeout=1800.0,
+                    step_name=step_name,
+                    params={"idea": idea, "style": style,
+                            "user_requirement": user_requirement},
+                    agent_service=self,
                 )
 
-            # Mark planning complete
-            svc._index.update_stage(session_id, "narrative_planned", "Step-by-step planning complete")
+                if result.get("status") == "error":
+                    error_msg = result.get("error", "Unknown error")
+                    logger.warning(
+                        "Workflow: step %s failed for %s: %s",
+                        step_name, session_id, error_msg,
+                    )
+
+                    # Present error to user and ask for retry/skip/cancel
+                    await self.broadcast(session_id, {
+                        "type": "step:need_confirm",
+                        "step": step_name,
+                        "message": f"步骤 {step_name} 执行失败: {error_msg}。要重试还是跳过？",
+                        "suggestions": ["重试", "跳过", "取消"],
+                    })
+
+                    try:
+                        gate_result = await self._confirmation_gate.wait_for_confirmation(
+                            session_id=session_id,
+                            prompt=f"步骤 {step_name} 执行失败: {error_msg}",
+                            timeout=1800.0,
+                        )
+                        action = gate_result.get("action", "")
+                        if action == "cancelled":
+                            svc._index.update_stage(session_id, "cancelled", "用户取消")
+                            return
+                        elif action in ("modify", "skip"):
+                            # Skip this step and move on
+                            await self.broadcast(session_id, {
+                                "type": "step:completed",
+                                "step": step_name,
+                                "result": {"summary": "已跳过",
+                                           "artifactPaths": [],
+                                           "previewData": None,
+                                           "editableFields": []},
+                            })
+                            i += 1
+                            continue
+                        else:
+                            # "confirm" or unknown → retry (don't increment i)
+                            continue
+                    except asyncio.TimeoutError:
+                        logger.info("Workflow: error-resolution timeout for %s, retrying", step_name)
+                        continue  # Retry on timeout
+                    except Exception:
+                        logger.exception("Workflow: error gate failed for %s", step_name)
+                        i += 1  # Skip on gate failure
+                        continue
+
+                # ── Step succeeded ────────────────────────────────────
+
+                # Skip confirmation for video_rendering (last step, auto-completes)
+                if step_name == "video_rendering":
+                    i += 1
+                    continue
+
+                # Request user confirmation before next step
+                await self.broadcast(session_id, {
+                    "type": "step:need_confirm",
+                    "step": step_name,
+                    "message": f"{step_name} 已完成，请审阅确认后进入下一步",
+                    "suggestions": ["确认", "重新生成", "需要修改"],
+                })
+
+                try:
+                    gate_result = await self._confirmation_gate.wait_for_confirmation(
+                        session_id=session_id,
+                        prompt=f"{step_name} 已完成，请确认",
+                        timeout=1800.0,
+                    )
+                    action = gate_result.get("action", "")
+                    if action == "cancelled":
+                        svc._index.update_stage(session_id, "cancelled", "用户取消")
+                        return
+                    elif action == "modify":
+                        # User wants to modify — the modify handler will
+                        # resume the gate and re-run the step.
+                        # Don't increment i so we loop back to the same step.
+                        logger.info(
+                            "Workflow: user requested modify on %s, re-running",
+                            step_name,
+                        )
+                        continue  # Re-run same step
+                    # "confirm" or any other action → proceed
+                except asyncio.TimeoutError:
+                    logger.info(
+                        "Workflow: confirmation timeout for %s, proceeding",
+                        step_name,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Workflow: confirmation gate error for %s, proceeding",
+                        step_name,
+                    )
+
+                i += 1  # Move to next step
+
+            # ── Workflow complete ─────────────────────────────────────
+            svc._index.update_stage(
+                session_id, "narrative_planned",
+                "Step-by-step workflow complete",
+            )
             await self.broadcast(session_id, {
                 "type": "pipeline:complete",
-                "stage": "narrative_planned",
-                "message": "所有步骤已完成，可以开始渲染",
+                "stage": "completed",
+                "session_id": session_id,
+                "message": "所有步骤已完成",
             })
 
         except asyncio.CancelledError:
             logger.info("Workflow cancelled for %s", session_id)
-            svc = get_session_service()
-            svc._index.update_stage(session_id, "cancelled", "Workflow cancelled")
+            try:
+                svc = get_session_service()
+                svc._index.update_stage(session_id, "cancelled", "Workflow cancelled")
+            except Exception:
+                pass
         except Exception as exc:
             logger.exception("Workflow failed for session %s", session_id)
             try:
@@ -487,4 +516,6 @@ class AgentService:
                     "error": f"工作流出错: {exc}",
                 })
             except Exception:
-                logger.exception("Failed to broadcast workflow error for %s", session_id)
+                logger.exception(
+                    "Failed to broadcast workflow error for %s", session_id,
+                )
