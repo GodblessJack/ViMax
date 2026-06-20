@@ -19,6 +19,11 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
+      '/ws/session': {
+        target: 'http://localhost:8000',
+        ws: true,
+        changeOrigin: true,
+      },
     },
   },
 })
