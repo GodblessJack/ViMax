@@ -84,6 +84,7 @@ export interface WorkflowState {
   connectionState: ConnectionState
   events: PipelineEvent[]
   _wsSendFn: ((event: any) => void) | null
+  _wsSendQueue: any[]
 
   // ── Artifacts ───────────────────────────────────────────────────
   finalVideoUrl: string | null
@@ -456,10 +457,24 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
 
   // WS send bridge — populated by useSessionWebSocket
   _wsSendFn: null as ((event: any) => void) | null,
-  setWsSendFn: (fn: ((event: any) => void) | null) => set({ _wsSendFn: fn }),
+  _wsSendQueue: [] as any[],
+  setWsSendFn: (fn: ((event: any) => void) | null) => {
+    const queue = get()._wsSendQueue
+    set({ _wsSendFn: fn })
+    // Flush queued messages when connection becomes available
+    if (fn && queue.length > 0) {
+      for (const ev of queue) fn(ev)
+      set({ _wsSendQueue: [] })
+    }
+  },
   sendWsMessage: (event: any) => {
     const fn = get()._wsSendFn
-    if (fn) fn(event)
+    if (fn) {
+      fn(event)
+    } else {
+      // Queue messages until WS connection is ready
+      set((state) => ({ _wsSendQueue: [...state._wsSendQueue, event] }))
+    }
   },
 
   handleWsEvent: (event: WsServerEvent) => {
