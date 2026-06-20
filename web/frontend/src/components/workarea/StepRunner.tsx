@@ -1,5 +1,7 @@
+import { Suspense } from 'react'
 import type { WorkflowStep } from '@/stores/types'
 import { useWorkflowStore } from '@/stores/workflowStore'
+import { STEP_RESULT_COMPONENTS } from './panels/index'
 
 export function StepRunner({ step }: { step: WorkflowStep }) {
   const runtime = useWorkflowStore((s) => s.runtime[step.name])
@@ -90,21 +92,41 @@ export function StepRunner({ step }: { step: WorkflowStep }) {
       {/* Phase: Done — Success state */}
       {runtime.phase === 'done' && !runtime.error && (
         <div className="result-panel space-y-3">
-          <div className="bg-card border rounded-lg p-4">
-            <h3 className="font-medium text-lg">{step.label} — 完成</h3>
-            {runtime.result && (
-              <>
-                <p className="text-sm text-muted-foreground mt-2">
-                  {runtime.result.summary}
-                </p>
-                {runtime.result.artifactPaths.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-2">
-                    生成 {runtime.result.artifactPaths.length} 个文件
-                  </p>
+          {(() => {
+            const Panel = STEP_RESULT_COMPONENTS[step.name]
+            const artifactData = runtime.result?.previewData
+            if (Panel && artifactData) {
+              return (
+                <Suspense fallback={<div className="p-4 text-muted-foreground text-sm">加载结果面板...</div>}>
+                  <Panel
+                    data={artifactData}
+                    onEdit={(path, value) => {
+                      const store = useWorkflowStore.getState()
+                      store.patchArtifact(step.name, { [path]: value })
+                    }}
+                  />
+                </Suspense>
+              )
+            }
+            // Fallback to generic summary
+            return (
+              <div className="bg-card border rounded-lg p-4">
+                <h3 className="font-medium text-lg">{step.label} — 完成</h3>
+                {runtime.result && (
+                  <>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      {runtime.result.summary}
+                    </p>
+                    {runtime.result.artifactPaths.length > 0 && (
+                      <p className="text-xs text-muted-foreground mt-2">
+                        生成 {runtime.result.artifactPaths.length} 个文件
+                      </p>
+                    )}
+                  </>
                 )}
-              </>
-            )}
-          </div>
+              </div>
+            )
+          })()}
         </div>
       )}
     </div>

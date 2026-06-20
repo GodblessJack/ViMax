@@ -18,6 +18,7 @@ export interface WorkflowStep {
   icon: string
   canSkip: boolean
   requiresConfirmation: boolean
+  subSteps?: string[]  // per-scene sub-steps for storyboard_design and video_rendering
 }
 
 // ── Step Runtime (three-phase display) ───────────────────────────────
@@ -251,6 +252,7 @@ export const WORKFLOW_STEPS: WorkflowStep[] = [
     icon: 'LayoutGrid',
     canSkip: false,
     requiresConfirmation: true,
+    subSteps: ['scene_0', 'scene_1', 'scene_2'],
   },
   {
     index: 4,
@@ -269,5 +271,6 @@ export const WORKFLOW_STEPS: WorkflowStep[] = [
     icon: 'Video',
     canSkip: false,
     requiresConfirmation: false,
+    subSteps: ['scene_0', 'scene_1', 'scene_2'],
   },
 ]
