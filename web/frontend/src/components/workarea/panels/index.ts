@@ -1,21 +1,21 @@
 import { lazy } from 'react'
 
-export const StoryResultPanel = lazy(() =>
+const StoryResultPanel = lazy(() =>
   import('./StoryResultPanel').then((m) => ({ default: m.StoryResultPanel }))
 )
-export const CharacterResultPanel = lazy(() =>
+const CharacterResultPanel = lazy(() =>
   import('./CharacterResultPanel').then((m) => ({ default: m.CharacterResultPanel }))
 )
-export const ScriptResultPanel = lazy(() =>
+const ScriptResultPanel = lazy(() =>
   import('./ScriptResultPanel').then((m) => ({ default: m.ScriptResultPanel }))
 )
-export const StoryboardResultPanel = lazy(() =>
+const StoryboardResultPanel = lazy(() =>
   import('./StoryboardResultPanel').then((m) => ({ default: m.StoryboardResultPanel }))
 )
-export const PortraitResultPanel = lazy(() =>
+const PortraitResultPanel = lazy(() =>
   import('./PortraitResultPanel').then((m) => ({ default: m.PortraitResultPanel }))
 )
-export const VideoResultPanel = lazy(() =>
+const VideoResultPanel = lazy(() =>
   import('./VideoResultPanel').then((m) => ({ default: m.VideoResultPanel }))
 )
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 
 interface VideoData {
   finalVideoUrl?: string;
@@ -22,6 +22,33 @@ export function VideoResultPanel({
   }
   const [showEditor, setShowEditor] = useState(false);
   const [editValue, setEditValue] = useState("");
+  const [downloading, setDownloading] = useState(false);
+
+  const handleDownload = useCallback(async () => {
+    if (!videoUrl) return;
+    setDownloading(true);
+    try {
+      const response = await fetch(videoUrl);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = blobUrl;
+      anchor.download = "final_video.mp4";
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.warn("[ViMax] Video download failed (cross-origin or network error):", err);
+      // Fallback: open in new tab so user can right-click save
+      window.open(videoUrl, "_blank");
+    } finally {
+      setDownloading(false);
+    }
+  }, [videoUrl]);
 
   const toggleEditor = () => {
     if (!showEditor) {
@@ -75,13 +102,13 @@ export function VideoResultPanel({
             className="w-full rounded-lg border"
             poster={(data as VideoData)?.thumbnail_url}
           />
-          <a
-            href={videoUrl}
-            download
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90"
+          <button
+            onClick={handleDownload}
+            disabled={downloading}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
-            ⬇️ 下载视频
-          </a>
+            {downloading ? "下载中..." : "⬇️ 下载视频"}
+          </button>
         </div>
       )}
     </div>

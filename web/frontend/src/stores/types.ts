@@ -35,6 +35,11 @@ export interface StepRuntime {
   streamedOutput: string
   result: StepResult | null
   error: string | null
+  preparingContext?: {
+    inputs?: Record<string, unknown>
+    constraints?: string[]
+    agentIntent?: string
+  }
 }
 
 export interface StepResult {

@@ -472,6 +472,15 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
       case 'step:preparing': {
         get().initRuntime(event.step)
         get().setActiveStepName(event.step as WorkflowStepName)
+        if (event.context) {
+          get().updateStepRuntime(event.step, {
+            preparingContext: {
+              inputs: event.context.inputs as Record<string, unknown> | undefined,
+              constraints: event.context.constraints as string[] | undefined,
+              agentIntent: event.context.agentIntent as string | undefined,
+            },
+          })
+        }
         break
       }
       case 'step:running': {

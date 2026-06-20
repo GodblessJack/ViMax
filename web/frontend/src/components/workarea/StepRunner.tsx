@@ -17,9 +17,42 @@ export function StepRunner({ step }: { step: WorkflowStep }) {
             <span className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" role="status" aria-label="加载中" />
             <span className="font-medium">{step.label} — 准备中...</span>
           </div>
-          <p className="text-sm text-muted-foreground">
-            正在分析输入和约束，准备开始生成...
-          </p>
+          {runtime.preparingContext ? (
+            <div className="space-y-2 text-sm text-muted-foreground bg-muted/30 rounded-lg p-3">
+              {runtime.preparingContext.inputs && Object.keys(runtime.preparingContext.inputs).length > 0 && (
+                <div>
+                  <p className="font-medium text-xs uppercase tracking-wide mb-1">输入</p>
+                  <ul className="list-disc list-inside space-y-0.5">
+                    {Object.entries(runtime.preparingContext.inputs).map(([k, v]) => (
+                      <li key={k}>
+                        <span className="font-medium">{k}:</span> {typeof v === 'string' ? v.slice(0, 120) : JSON.stringify(v).slice(0, 120)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {runtime.preparingContext.constraints && runtime.preparingContext.constraints.length > 0 && (
+                <div>
+                  <p className="font-medium text-xs uppercase tracking-wide mb-1">约束</p>
+                  <ul className="list-disc list-inside space-y-0.5">
+                    {runtime.preparingContext.constraints.map((c, i) => (
+                      <li key={i}>{c}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {runtime.preparingContext.agentIntent && (
+                <div>
+                  <p className="font-medium text-xs uppercase tracking-wide mb-1">Agent 意图</p>
+                  <p className="italic">{runtime.preparingContext.agentIntent}</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              正在分析输入和约束，准备开始生成...
+            </p>
+          )}
         </div>
       )}
 

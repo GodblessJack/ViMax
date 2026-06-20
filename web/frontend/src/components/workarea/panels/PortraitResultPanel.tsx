@@ -71,6 +71,8 @@ export function PortraitResultPanel({
                 <img
                   src={p.image_url}
                   alt={`${p.character} ${p.view}`}
+                  loading="lazy"
+                  decoding="async"
                   className="w-full aspect-square object-cover"
                 />
               ) : (
