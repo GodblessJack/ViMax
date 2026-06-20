@@ -46,8 +46,38 @@ export function WorkArea() {
         if (!detail || detail.stage === lastStage) return
         lastStage = detail.stage
 
-        // Update store based on stage progress
-        const completedUpTo = STAGE_TO_STEP[detail.stage] ?? 0
+        // Load artifact content when stage advances
+        if (detail.artifact_checklist) {
+          const store = useWorkflowStore.getState()
+          const baseUrl = `/api/files/${sessionId}/idea2video`
+
+          try {
+            if (detail.artifact_checklist.story) {
+              const r = await fetch(`${baseUrl}/story.txt`)
+              if (r.ok) store.setStory(await r.text())
+            }
+            if (detail.artifact_checklist.characters) {
+              const r = await fetch(`${baseUrl}/characters.json`)
+              if (r.ok) store.setCharacters(await r.json())
+            }
+            if (detail.artifact_checklist.script) {
+              const r = await fetch(`${baseUrl}/script.json`)
+              if (r.ok) store.setScenes(await r.json())
+            }
+            // Update runtime results with artifact content
+            const completedUpTo = STAGE_TO_STEP[detail.stage] ?? 0
+            const stepNames = ['story_generation','character_extraction','script_writing','storyboard_design','character_portraits','video_rendering'] as WorkflowStepName[]
+            for (let i = 0; i < completedUpTo && i < stepNames.length; i++) {
+              setRuntimeResult(stepNames[i], {
+                summary: `${stepNames[i]} 已完成`,
+                artifactPaths: [],
+                previewData: i === 0 ? store.story : i === 1 ? store.characters : i === 2 ? store.scenes : null,
+                editableFields: [],
+              })
+              setRuntimePhase(stepNames[i], 'done')
+            }
+          } catch { /* ignore fetch errors */ }
+        }
         const stepNames: WorkflowStepName[] = [
           'story_generation', 'character_extraction', 'script_writing',
           'storyboard_design', 'character_portraits', 'video_rendering',
