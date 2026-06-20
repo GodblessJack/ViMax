@@ -7,7 +7,7 @@
 // until the legacy page is fully migrated.
 
 import { create } from 'zustand'
-import type { WorkflowStepName, StepRuntime, StepResult, StepStatus, WizardStep, WsServerEvent, ChatMessage, AgentSuggestion, PendingConfirmation, CharacterInfo, SceneScript, StoryboardScene } from '@/stores/types'
+import type { WorkflowStepName, StepRuntime, StepResult, StepStatus, WizardStep, WsServerEvent, ChatMessage, AgentSuggestion, PendingConfirmation, CharacterInfo, SceneScript, StoryboardScene, SessionStage, PipelineError } from '@/stores/types'
 import { WORKFLOW_STEPS } from '@/stores/types'
 import { logger } from '@/lib/logger'
 
@@ -64,6 +64,18 @@ export interface WorkflowState {
   // ── Workflow Steps (granular 6-step) ────────────────────────────
   steps: typeof WORKFLOW_STEPS
   activeStepName: WorkflowStepName | null
+
+  // ── Session Stage (from connected WS event) ─────────────────────
+  sessionStage: SessionStage | null
+
+  // ── Navigation ──────────────────────────────────────────────────
+  currentStepIndex: number
+
+  // ── Confirmation tracking ───────────────────────────────────────
+  confirmedSteps: Set<number>
+
+  // ── Error tracking ──────────────────────────────────────────────
+  errors: PipelineError[]
 
   // ── Step Runtime (three-phase) ──────────────────────────────────
   runtime: Record<string, StepRuntime>
@@ -211,6 +223,10 @@ const initialState: WorkflowState = {
   cancelled: false,
   steps: WORKFLOW_STEPS,
   activeStepName: null,
+  sessionStage: null,
+  currentStepIndex: 0,
+  confirmedSteps: new Set<number>(),
+  errors: [],
   runtime: createDefaultRuntime(),
   connectionState: 'disconnected',
   events: [],
