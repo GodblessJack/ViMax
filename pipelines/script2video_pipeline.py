@@ -21,6 +21,38 @@ def _select_pairs(pairs, indices):
     if invalid:
         raise ValueError(f"ref_image_indices out of range: {invalid} (have {len(pairs)} images)")
     return [pairs[i] for i in indices]
+
+
+def _load_cached_selector_output(
+    path: str,
+    shot_idx: int,
+    frame_label: str,
+) -> dict | None:
+    """Load a cached selector-output JSON file, or return None if missing/corrupt.
+
+    Corrupt files (empty, truncated, or unparseable) are **deleted** so the
+    next run regenerates them instead of failing in an infinite loop.
+    """
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        # Structural sanity check: must be a dict with required keys.
+        if not isinstance(data, dict) or "ref_image_indices" not in data:
+            raise ValueError("Missing required keys in cached selector output")
+        return data
+    except (json.JSONDecodeError, ValueError, OSError) as exc:
+        logging.warning(
+            "Corrupt selector cache for shot %d %s (%s), deleting and regenerating.",
+            shot_idx, frame_label, exc)
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return None
+
+
 from utils.video import concatenate_video_files
 
 
@@ -425,9 +457,12 @@ class Script2VideoPipeline:
             # 如果子镜头缺少信息，则需要选择参考图像生成
             if camera.parent_shot_idx is None or camera.missing_info is not None:
                 ff_selector_output_path = os.path.join(self.working_dir, "shots", f"{first_shot_idx}", "first_frame_selector_output.json")
-                if os.path.exists(ff_selector_output_path):
-                    with open(ff_selector_output_path, 'r', encoding='utf-8') as f:
-                        ff_selector_output = json.load(f)
+                ff_selector_output = _load_cached_selector_output(
+                    ff_selector_output_path,
+                    shot_idx=first_shot_idx,
+                    frame_label="first_frame",
+                )
+                if ff_selector_output is not None:
                     print(f"🚀 Loaded existing reference image selection and prompt for first_frame of shot {first_shot_idx} from {ff_selector_output_path}.")
                     _emit_render_progress(progress, "frame_prompt_exists", f"First frame prompt for shot {first_shot_idx} already exists", {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "frame_type": "first_frame", "path": ff_selector_output_path})
                 else:
@@ -437,14 +472,33 @@ class Script2VideoPipeline:
                         available_image_path_and_text_pairs=available_image_path_and_text_pairs,
                         frame_description=shot_descriptions[first_shot_idx].ff_desc
                     )
-                    ff_selector_output = ff_selector_output.model_dump()
                     with open(ff_selector_output_path, 'w', encoding='utf-8') as f:
                         json.dump(ff_selector_output, f, ensure_ascii=False, indent=4)
 
                     print(f"☑️ Selected reference images and generated prompt for first_frame of shot {first_shot_idx}, saved to {ff_selector_output_path}.")
                     _emit_render_progress(progress, "frame_prompt_done", f"Selected references for first frame of shot {first_shot_idx}", {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "frame_type": "first_frame", "path": ff_selector_output_path})
 
-                reference_image_path_and_text_pairs, prompt = _select_pairs(available_image_path_and_text_pairs, ff_selector_output["ref_image_indices"]), ff_selector_output["text_prompt"]
+                try:
+                    reference_image_path_and_text_pairs = _select_pairs(available_image_path_and_text_pairs, ff_selector_output["ref_image_indices"])
+                except ValueError:
+                    # Cached indices are stale (e.g. image set changed between runs).
+                    # Delete the corrupt cache and regenerate.
+                    logging.warning(
+                        "Stale indices in cached selector output for shot %d first_frame, regenerating.",
+                        first_shot_idx)
+                    try:
+                        os.remove(ff_selector_output_path)
+                    except OSError:
+                        pass
+                    ff_selector_output = await self.reference_image_selector.select_reference_images_and_generate_prompt(
+                        available_image_path_and_text_pairs=available_image_path_and_text_pairs,
+                        frame_description=shot_descriptions[first_shot_idx].ff_desc
+                    )
+                    with open(ff_selector_output_path, 'w', encoding='utf-8') as f:
+                        json.dump(ff_selector_output, f, ensure_ascii=False, indent=4)
+                    reference_image_path_and_text_pairs = _select_pairs(available_image_path_and_text_pairs, ff_selector_output["ref_image_indices"])
+
+                prompt = ff_selector_output["text_prompt"]
                 prefix_prompt = ""
                 for i, (image_path, text) in enumerate(reference_image_path_and_text_pairs):
                     prefix_prompt += f"Image {i}: {text}\n"
@@ -578,9 +632,12 @@ class Script2VideoPipeline:
             available_image_path_and_text_pairs.append(first_shot_ff_path_and_text_pair)
 
             selector_output_path = os.path.join(self.working_dir, "shots", f"{shot_idx}", f"{frame_type}_selector_output.json")
-            if os.path.exists(selector_output_path):
-                with open(selector_output_path, 'r', encoding='utf-8') as f:
-                    selector_output = json.load(f)
+            selector_output = _load_cached_selector_output(
+                selector_output_path,
+                shot_idx=shot_idx,
+                frame_label=frame_type,
+            )
+            if selector_output is not None:
                 print(f"🚀 Loaded existing reference image selection and prompt for {frame_type} frame of shot {shot_idx} from {selector_output_path}.")
                 _emit_render_progress(progress, "frame_prompt_exists", f"Prompt for {frame_type} of shot {shot_idx} already exists", {"shot_idx": shot_idx, "frame_type": frame_type, "path": selector_output_path})
             else:
@@ -590,13 +647,31 @@ class Script2VideoPipeline:
                     available_image_path_and_text_pairs=available_image_path_and_text_pairs,
                     frame_description=frame_desc
                 )
-                selector_output = selector_output.model_dump()
                 with open(selector_output_path, 'w', encoding='utf-8') as f:
                     json.dump(selector_output, f, ensure_ascii=False, indent=4)
                 print(f"☑️ Selected reference images and generated prompt for {frame_type} frame of shot {shot_idx}, saved to {selector_output_path}.")
                 _emit_render_progress(progress, "frame_prompt_done", f"Selected references for {frame_type} of shot {shot_idx}", {"shot_idx": shot_idx, "frame_type": frame_type, "path": selector_output_path})
 
-            reference_image_path_and_text_pairs, prompt = _select_pairs(available_image_path_and_text_pairs, selector_output["ref_image_indices"]), selector_output["text_prompt"]
+            try:
+                reference_image_path_and_text_pairs = _select_pairs(available_image_path_and_text_pairs, selector_output["ref_image_indices"])
+            except ValueError:
+                # Cached indices are stale — delete corrupt cache and regenerate.
+                logging.warning(
+                    "Stale indices in cached selector output for shot %d %s, regenerating.",
+                    shot_idx, frame_type)
+                try:
+                    os.remove(selector_output_path)
+                except OSError:
+                    pass
+                selector_output = await self.reference_image_selector.select_reference_images_and_generate_prompt(
+                    available_image_path_and_text_pairs=available_image_path_and_text_pairs,
+                    frame_description=frame_desc
+                )
+                with open(selector_output_path, 'w', encoding='utf-8') as f:
+                    json.dump(selector_output, f, ensure_ascii=False, indent=4)
+                reference_image_path_and_text_pairs = _select_pairs(available_image_path_and_text_pairs, selector_output["ref_image_indices"])
+
+            prompt = selector_output["text_prompt"]
             prefix_prompt = ""
             for i, (image_path, text) in enumerate(reference_image_path_and_text_pairs):
                 prefix_prompt += f"Image {i}: {text}\n"

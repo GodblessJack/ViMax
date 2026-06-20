@@ -88,12 +88,13 @@ class VideoGeneratorDashScope:
     async def _submit_task(self, payload: dict) -> str:
         """Submit video generation task, return task_id.
 
-        Retries up to 2 times on throttling (rate-limit) errors only.
-        Non-throttling errors (auth, invalid params, etc.) raise immediately.
-        Pipeline-level retry is handled by the caller (script2video_pipeline).
+        Retries up to 3 times on throttling (rate-limit) errors with
+        exponential backoff + jitter.  Non-throttling errors (auth,
+        invalid params) raise immediately.
         """
         session = await self._get_session()
-        for attempt in range(2):
+        last_error = None
+        for attempt in range(3):
             async with session.post(
                 SYNTHESIS_ENDPOINT, json=payload, headers=self._headers()
             ) as resp:
@@ -103,15 +104,17 @@ class VideoGeneratorDashScope:
             code = data.get("code", "UNKNOWN")
             msg = data.get("message", str(data))
             if "Throttling" in str(code) or "Rate" in str(code):
-                wait = 15 * (attempt + 1)
-                logger.warning("DashScope video rate limited, waiting %ds...", wait)
-                await asyncio.sleep(wait)
+                last_error = RuntimeError(f"DashScope video rate limited: {code} - {msg}")
+                if attempt < 2:
+                    wait = (2 ** attempt) * 15 + (hash(str(payload)) % 5)  # 15s, 30s, 60s ± jitter
+                    logger.warning(
+                        "DashScope video rate limited (attempt %d/3), waiting %ds...",
+                        attempt + 1, wait)
+                    await asyncio.sleep(wait)
             else:
-                raise RuntimeError(
-                    f"DashScope video error: {code} - {msg}"
-                )
+                raise RuntimeError(f"DashScope video error: {code} - {msg}")
         else:
-            raise RuntimeError(f"DashScope video: all retries exhausted: {data}")
+            raise last_error  # type: ignore[misc]
 
         task_id = data.get("output", {}).get("task_id")
         if not task_id:
