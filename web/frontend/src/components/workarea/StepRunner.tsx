@@ -1,7 +1,48 @@
-import { Suspense } from 'react'
-import type { WorkflowStep } from '@/stores/types'
+import { Suspense, useMemo } from 'react'
+import type { WorkflowStep, WorkflowStepName } from '@/stores/types'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { STEP_RESULT_COMPONENTS } from './panels/index'
+
+/**
+ * Resolve the best available data for a step's result panel.
+ * Prefers server-side previewData; falls back to dedicated store fields.
+ */
+function useStepResultData(
+  stepName: WorkflowStepName,
+  previewData: unknown,
+): unknown {
+  const story = useWorkflowStore((s) => s.story)
+  const characters = useWorkflowStore((s) => s.characters)
+  const scenes = useWorkflowStore((s) => s.scenes)
+  const storyboardScenes = useWorkflowStore((s) => s.storyboardScenes)
+  const artifacts = useWorkflowStore((s) => s.artifacts)
+  const finalVideoUrl = useWorkflowStore((s) => s.finalVideoUrl)
+
+  // Server-supplied previewData takes priority
+  if (previewData !== undefined && previewData !== null) return previewData
+
+  // Fall back to step-specific store data
+  switch (stepName) {
+    case 'story_generation':
+      return story ? story : undefined
+    case 'character_extraction':
+      return characters.length > 0 ? characters : undefined
+    case 'script_writing':
+      return scenes.length > 0 ? scenes : undefined
+    case 'storyboard_design':
+      return storyboardScenes.length > 0 ? storyboardScenes : undefined
+    case 'character_portraits':
+      return artifacts['portraits'] ?? undefined
+    case 'video_rendering':
+      return finalVideoUrl
+        ? { finalVideoUrl }
+        : artifacts['final_video']
+          ? artifacts['final_video']
+          : undefined
+    default:
+      return undefined
+  }
+}
 
 export function StepRunner({ step }: { step: WorkflowStep }) {
   const runtime = useWorkflowStore((s) => s.runtime[step.name])
@@ -93,39 +134,124 @@ export function StepRunner({ step }: { step: WorkflowStep }) {
 
       {/* Phase: Done — Success state */}
       {runtime.phase === 'done' && !runtime.error && (
-        <div className="result-panel space-y-3">
-          {(() => {
-            const Panel = STEP_RESULT_COMPONENTS[step.name]
-            const artifactData = runtime.result?.previewData
-            if (Panel !== undefined && artifactData !== undefined && artifactData !== null) {
-              return (
-                <Suspense key={step.name} fallback={<div className="p-4 text-muted-foreground text-sm">加载结果面板...</div>}>
-                  {/* TODO: When editing is implemented, panels should write to local state
-                      that syncs both to store.artifacts AND server via WS */}
-                  <Panel data={artifactData} step={step} />
-                </Suspense>
-              )
-            }
-            // Fallback to generic summary
-            return (
-              <div className="bg-card border rounded-lg p-4">
-                <h3 className="font-medium text-lg">{step.label} — 完成</h3>
-                {runtime.result && (
-                  <>
-                    <p className="text-sm text-muted-foreground mt-2">
-                      {runtime.result.summary}
-                    </p>
-                    {runtime.result.artifactPaths.length > 0 && (
-                      <p className="text-xs text-muted-foreground mt-2">
-                        生成 {runtime.result.artifactPaths.length} 个文件
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-            )
-          })()}
+        <DoneSuccessPanel step={step} runtime={runtime} />
+      )}
+    </div>
+  )
+}
+
+// ── Done Success Panel ─────────────────────────────────────────────────
+
+function DoneSuccessPanel({
+  step,
+  runtime,
+}: {
+  step: WorkflowStep
+  runtime: import('@/stores/types').StepRuntime
+}) {
+  const artifactData = useStepResultData(
+    step.name,
+    runtime.result?.previewData,
+  )
+  const Panel = STEP_RESULT_COMPONENTS[step.name]
+  const hasPanel =
+    Panel !== undefined &&
+    artifactData !== undefined &&
+    artifactData !== null &&
+    // Guard: arrays/strings with no content shouldn't render specialized panel
+    !(
+      (Array.isArray(artifactData) && artifactData.length === 0) ||
+      (typeof artifactData === 'string' && artifactData.length === 0) ||
+      (typeof artifactData === 'object' &&
+        !Array.isArray(artifactData) &&
+        Object.keys(artifactData as Record<string, unknown>).length === 0)
+    )
+
+  const artifactPaths: string[] = runtime.result?.artifactPaths ?? []
+
+  // Derive a data-type label for the summary line
+  const dataKindLabel = useMemo(() => {
+    if (!hasPanel) return null
+    if (Array.isArray(artifactData)) {
+      const first = (artifactData as unknown[])[0]
+      if (first && typeof first === 'object' && 'identifier' in (first as object))
+        return '角色'
+      if (first && typeof first === 'object' && 'shot_count' in (first as object))
+        return '场景'
+      if (first && typeof first === 'object' && 'shots' in (first as object))
+        return '分镜'
+      if (first && typeof first === 'object' && 'view' in (first as object))
+        return '肖像'
+      return `共 ${(artifactData as unknown[]).length} 项`
+    }
+    if (typeof artifactData === 'string') return '故事文本'
+    if (
+      typeof artifactData === 'object' &&
+      artifactData !== null &&
+      'finalVideoUrl' in (artifactData as object)
+    )
+      return '视频'
+    return null
+  }, [artifactData, hasPanel])
+
+  return (
+    <div className="result-panel space-y-4">
+      {/* Header with checkmark */}
+      <div className="flex items-center gap-2">
+        <span
+          className="text-green-500 text-lg shrink-0"
+          role="img"
+          aria-label="完成"
+        >
+          ✅
+        </span>
+        <h3 className="font-semibold text-lg">{step.label} — 完成</h3>
+      </div>
+
+      {/* Summary text */}
+      {runtime.result?.summary && (
+        <p className="text-sm text-muted-foreground bg-muted/30 rounded-lg p-3 leading-relaxed">
+          {runtime.result.summary}
+        </p>
+      )}
+
+      {/* File generation count */}
+      {artifactPaths.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          生成 {artifactPaths.length} 个文件
+          {dataKindLabel && (
+            <span className="ml-1">· {dataKindLabel}</span>
+          )}
+        </p>
+      )}
+
+      {/* Specialized result panel or generic file list */}
+      {hasPanel ? (
+        <Suspense
+          key={step.name}
+          fallback={
+            <div className="p-4 text-muted-foreground text-sm">
+              加载结果面板...
+            </div>
+          }
+        >
+          <Panel data={artifactData} step={step} />
+        </Suspense>
+      ) : artifactPaths.length > 0 ? (
+        <div className="bg-card border rounded-lg p-4">
+          <h4 className="font-medium text-sm mb-2">生成文件</h4>
+          <ul className="text-xs text-muted-foreground space-y-1">
+            {artifactPaths.map((p, i) => (
+              <li key={i} className="font-mono break-all">
+                {p}
+              </li>
+            ))}
+          </ul>
         </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          该步骤已完成，暂无详细结果数据。
+        </p>
       )}
     </div>
   )
