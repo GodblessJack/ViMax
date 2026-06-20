@@ -174,6 +174,32 @@ class CameraImageGenerator:
         )
         return video_output
 
+    async def generate_transition_image_fallback(
+        self,
+        first_shot_visual_desc: str,
+        second_shot_visual_desc: str,
+        first_shot_ff_path: str,
+        progress=None,
+    ) -> ImageOutput:
+        """Cheap fallback: generate a static image blending two shots instead of a full video.
+
+        A transition video costs ~¥1.5-3.0 per DashScope call, but we only need a single
+        reference frame from it.  When video generation fails or is too expensive, this
+        method produces a comparable reference image for ~¥0.12.
+        """
+        prompt = (
+            f"A single frame that captures the moment of transition between two shots. "
+            f"The composition should blend elements from both shots seamlessly. "
+            f"First shot: {first_shot_visual_desc}. "
+            f"Second shot: {second_shot_visual_desc}."
+        )
+        image_output = await self.image_generator.generate_single_image(
+            prompt=prompt,
+            reference_image_paths=[first_shot_ff_path],
+            size="1664*928",
+        )
+        return image_output
+
 
     def get_new_camera_image(
         self,

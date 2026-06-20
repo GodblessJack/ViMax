@@ -16,8 +16,7 @@ wheels/
 # Node dependencies
 node_modules/
 
-# Local agent secrets
+# Local agent secrets (tracked in git — use .env for secrets)
 configs/*.local.json
 configs/*.local.yaml
-!configs/agent.local.yaml
 .gstack/

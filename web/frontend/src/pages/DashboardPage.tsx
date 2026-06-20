@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Play, Clock, Sparkles, ArrowRight, Trash2 } from 'lucide-react'
+import { Plus, Play, Clock, Sparkles, ArrowRight, Trash2, AlertTriangle, RefreshCw } from 'lucide-react'
 import { listSessions, listWorks, deleteSession, getFileUrl } from '@/lib/api'
 import type { SessionSummary, WorkItem } from '@/lib/types'
 import { DashboardSkeleton } from '@/components/ui/Skeleton'
@@ -14,6 +14,7 @@ export default function DashboardPage() {
   const [recentWorks, setRecentWorks] = useState<WorkItem[]>([])
   const [activeSessions, setActiveSessions] = useState<SessionSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const { toast } = useToast()
 
@@ -32,27 +33,48 @@ export default function DashboardPage() {
   }, [deleteTarget, toast])
 
   useEffect(() => {
+    let cancelled = false
     async function load() {
       try {
         const [works, sessions] = await Promise.all([
           listWorks({ limit: 8 }),
           listSessions({ limit: 10 }),
         ])
+        if (cancelled) return
         setRecentWorks(works.items)
         const active = sessions.items.filter(
           s => s.stage === 'rendering' || s.stage === 'narrative_planning' || s.stage === 'narrative_planned',
         )
         setActiveSessions(active)
       } catch {
-        // API not ready yet
+        if (!cancelled) setError('无法加载数据，请检查网络连接后刷新页面')
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
     load()
+    return () => { cancelled = true }
   }, [])
 
   if (loading) return <DashboardSkeleton />
+
+  if (error) {
+    return (
+      <div className="p-6 max-w-5xl mx-auto page-enter">
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
+          <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-3" />
+          <p className="text-sm text-destructive mb-4">{error}</p>
+          <button
+            onClick={() => { setError(null); setLoading(true); window.location.reload() }}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            <RefreshCw className="h-4 w-4" />
+            刷新页面
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-6 max-w-5xl mx-auto page-enter">
@@ -76,7 +98,7 @@ export default function DashboardPage() {
 
           <button
             onClick={() => navigate('/create')}
-            className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-primary-foreground hover:bg-[#E84A4F] transition-all duration-200 font-semibold shadow-sm hover:shadow-md active:scale-[0.98]"
+            className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-primary-foreground hover:brightness-90 transition-all duration-200 font-semibold shadow-sm hover:shadow-md active:scale-[0.98]"
           >
             <Plus className="h-5 w-5" />
             开始创建
@@ -170,7 +192,7 @@ export default function DashboardPage() {
             action={
               <button
                 onClick={() => navigate('/create')}
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-[#E84A4F] transition-colors"
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:brightness-90 transition-colors"
               >
                 <Plus className="h-4 w-4" />
                 创建短剧

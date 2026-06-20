@@ -308,7 +308,7 @@ class SessionIndex:
 
     def _new_session_id(self, source: str, sessions: dict[str, Any]) -> str:
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        slug = re.sub(r"[^a-zA-Z0-9]+", "-", source.lower()).strip("-")[:32] or "vimax"
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", source.lower()).strip("-")[:32].rstrip("-") or "vimax"
         return self._dedupe_session_id(f"{stamp}-{slug}", sessions)
 
     def _dedupe_session_id(self, base: str, sessions: dict[str, Any]) -> str:

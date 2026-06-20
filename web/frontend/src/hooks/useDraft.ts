@@ -11,12 +11,18 @@ type Draft = {
 export function useDraft(idea: string, style: string) {
   const restoredRef = useRef(false)
 
-  // Auto-save every 3 seconds
+  const lastSavedRef = useRef<{ idea: string; style: string }>({ idea: '', style: '' })
+
+  // Auto-save every 3 seconds — only write to localStorage when data changed
   useEffect(() => {
     const timer = setInterval(() => {
+      if (idea === lastSavedRef.current.idea && style === lastSavedRef.current.style) return
       if (idea.trim() || style) {
         const draft: Draft = { idea, style, savedAt: Date.now() }
-        try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)) } catch {}
+        try {
+          localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+          lastSavedRef.current = { idea, style }
+        } catch { /* quota exceeded — retry next interval */ }
       }
     }, 3000)
     return () => clearInterval(timer)

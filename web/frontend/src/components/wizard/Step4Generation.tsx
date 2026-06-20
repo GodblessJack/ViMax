@@ -67,7 +67,7 @@ export default function Step4Generation({ events, connected, connectionState, to
             <div>
               <p className="font-semibold mb-1">生成出错</p>
               {errorEvents.map((e, i) => (
-                <p key={i} className="text-xs mt-0.5 whitespace-pre-wrap">{e.error}</p>
+                <p key={`err-${i}`} className="text-xs mt-0.5 whitespace-pre-wrap">{e.error}</p>
               ))}
             </div>
           </div>
@@ -115,7 +115,7 @@ export default function Step4Generation({ events, connected, connectionState, to
           </h3>
           <div className="grid grid-cols-3 gap-2">
             {donePortraits.map((e, i) => (
-              <div key={i} className="rounded-xl border overflow-hidden bg-card group relative">
+              <div key={`portrait-${i}`} className="rounded-xl border overflow-hidden bg-card group relative">
                 {e.image_url && !brokenImages.has(e.image_url) ? (
                   <div className="relative cursor-pointer" onClick={() => setLightboxIndex(i)}>
                     <img
@@ -160,7 +160,7 @@ export default function Step4Generation({ events, connected, connectionState, to
               const isCurrent = !status && shotStatuses && i === shotStatuses.doneCount
               return (
                 <div
-                  key={i}
+                  key={`shot-${i}`}
                   className={cn(
                     'aspect-square rounded-lg flex items-center justify-center text-[10px] font-mono transition-all',
                     status === 'done' && 'bg-success/10 border border-success/30 text-success',
@@ -188,7 +188,7 @@ export default function Step4Generation({ events, connected, connectionState, to
         </summary>
         <div className="mt-2 max-h-40 overflow-y-auto space-y-0.5 rounded-lg bg-muted/50 p-2 font-mono">
           {events.map((e, i) => (
-            <div key={i} className={cn(
+            <div key={`log-${i}`} className={cn(
               'text-[11px] leading-relaxed',
               e.type === 'pipeline_error' && 'text-destructive',
               e.type === 'pipeline_complete' && 'text-success font-semibold',
@@ -231,8 +231,8 @@ export default function Step4Generation({ events, connected, connectionState, to
           images={portraitImages}
           currentIndex={lightboxIndex}
           onClose={() => setLightboxIndex(null)}
-          onPrev={() => setLightboxIndex(i => Math.max(0, i - 1))}
-          onNext={() => setLightboxIndex(i => Math.min(portraitImages.length - 1, i + 1))}
+          onPrev={() => setLightboxIndex(i => i === null ? 0 : Math.max(0, i - 1))}
+          onNext={() => setLightboxIndex(i => i === null ? (portraitImages.length - 1) : Math.min(portraitImages.length - 1, i + 1))}
         />
       )}
     </div>

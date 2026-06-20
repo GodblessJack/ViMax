@@ -1,6 +1,6 @@
 """Session CRUD router."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from web.backend.services.session_service import SessionService
 from web.backend.models.api_models import (
@@ -16,7 +16,12 @@ def _get_service() -> SessionService:
 
 
 @router.get("", response_model=SessionListResponse)
-async def list_sessions(search: str = "", stage: str = "", limit: int = 50, offset: int = 0):
+async def list_sessions(
+    search: str = "",
+    stage: str = "",
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
     return _get_service().list_sessions(search=search, stage=stage, limit=limit, offset=offset)
 
 

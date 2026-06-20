@@ -8,6 +8,7 @@ dependencies = [
     "aiohttp>=3.12.14",
     "chardet>=5.2.0",
     "faiss-cpu>=1.12.0",
+    "fastapi",
     "google-genai>=1.47.0",
     "langchain>=0.3.26",
     "langchain-community>=0.3.27",
@@ -16,10 +17,13 @@ dependencies = [
     "openai>=1.95.0",
     "opencv-python",
     "pillow>=11.3.0",
+    "pydantic-settings",
+    "python-multipart",
     "pyyaml>=6.0.2",
     "requests>=2.32.4",
     "scenedetect[opencv]>=0.6.7.1",
     "tenacity>=9.1.2",
+    "uvicorn[standard]",
 ]
 
 [tool.uv.sources]

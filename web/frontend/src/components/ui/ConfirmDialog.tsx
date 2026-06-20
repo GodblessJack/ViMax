@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { AlertTriangle } from 'lucide-react'
 
 type ConfirmDialogProps = {
@@ -10,7 +10,6 @@ type ConfirmDialogProps = {
   variant?: 'danger' | 'default'
   onConfirm: () => void
   onCancel: () => void
-  children?: ReactNode
 }
 
 export function ConfirmDialog({
@@ -18,10 +17,18 @@ export function ConfirmDialog({
   confirmLabel = '确认', cancelLabel = '取消',
   variant = 'default', onConfirm, onCancel,
 }: ConfirmDialogProps) {
+  // Escape key dismisses dialog
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onCancel])
+
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/30 animate-fade-in" onClick={onCancel} />
 
@@ -34,7 +41,7 @@ export function ConfirmDialog({
             </div>
           )}
           <div className="flex-1">
-            <h3 className="font-semibold text-foreground">{title}</h3>
+            <h3 id="confirm-dialog-title" className="font-semibold text-foreground">{title}</h3>
             <p className="mt-1 text-sm text-muted-foreground">{message}</p>
           </div>
         </div>
@@ -51,7 +58,7 @@ export function ConfirmDialog({
             className={`rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors ${
               variant === 'danger'
                 ? 'bg-destructive hover:bg-red-600'
-                : 'bg-primary hover:bg-[#E84A4F]'
+                : 'bg-primary hover:brightness-90'
             }`}
           >
             {confirmLabel}

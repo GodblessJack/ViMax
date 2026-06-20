@@ -1,0 +1,322 @@
+2026-06-20 19:17:08 [INFO   ] web.backend.main | Startup recovery: marked orphaned session 20260620-191335-vimax as cancelled
+2026-06-20 19:17:08 [INFO   ] web.backend.main | Startup recovery: marked orphaned session 20260620-191355-vimax as cancelled
+2026-06-20 19:17:26 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 19:21:16 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 19:21:17 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 19:21:23 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 19:34:07 [ERROR  ] root | Error get image prompt: 
+ref_image_indices out of range: [0] (have 0 images)
+2026-06-20 19:34:07 [WARNING] root | Retrying select_reference_images_and_generate_prompt due to ValueError('ref_image_indices out of range: [0] (have 0 images)') (Attempt 1)
+2026-06-20 19:34:10 [ERROR  ] root | Error get image prompt: 
+ref_image_indices out of range: [0, 1, 2] (have 0 images)
+2026-06-20 19:34:10 [WARNING] root | Retrying select_reference_images_and_generate_prompt due to ValueError('ref_image_indices out of range: [0, 1, 2] (have 0 images)') (Attempt 2)
+2026-06-20 19:34:14 [ERROR  ] root | Error get image prompt: 
+ref_image_indices out of range: [0] (have 0 images)
+2026-06-20 19:34:14 [WARNING] root | Retrying select_reference_images_and_generate_prompt due to ValueError('ref_image_indices out of range: [0] (have 0 images)') (Attempt 3)
+2026-06-20 19:34:14 [ERROR  ] web.backend.services.pipeline_service | Rendering failed for session 20260620-192352-vimax
+Traceback (most recent call last):
+  File "/home/admin/ViMax/.venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 114, in __call__
+    result = await fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/ViMax/agents/reference_image_selector.py", line 223, in select_reference_images_and_generate_prompt
+    raise e
+  File "/home/admin/ViMax/agents/reference_image_selector.py", line 215, in select_reference_images_and_generate_prompt
+    reference_image_path_and_text_pairs = select_pairs_by_indices(filtered_image_path_and_text_pairs, response.ref_image_indices)
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/ViMax/agents/reference_image_selector.py", line 235, in select_pairs_by_indices
+    raise ValueError(f"ref_image_indices out of range: {invalid} (have {len(pairs)} images)")
+ValueError: ref_image_indices out of range: [0] (have 0 images)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/admin/ViMax/web/backend/services/pipeline_service.py", line 640, in _run_rendering
+    await asyncio.wait_for(
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/home/admin/ViMax/pipelines/script2video_pipeline.py", line 263, in __call__
+    await asyncio.gather(*tasks)
+  File "/home/admin/ViMax/pipelines/script2video_pipeline.py", line 428, in generate_frames_for_single_camera
+    ff_selector_output = await self.reference_image_selector.select_reference_images_and_generate_prompt(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/ViMax/.venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 189, in async_wrapped
+    return await copy(fn, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/ViMax/.venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 111, in __call__
+    do = await self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/ViMax/.venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 153, in iter
+    result = await action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/ViMax/.venv/lib/python3.12/site-packages/tenacity/_utils.py", line 99, in inner
+    return call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/ViMax/.venv/lib/python3.12/site-packages/tenacity/__init__.py", line 421, in exc_check
+    raise retry_exc from fut.exception()
+tenacity.RetryError: RetryError[<Future at 0x7f96d7838200 state=finished raised ValueError>]
+2026-06-20 19:37:48 [ERROR  ] asyncio | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7f96d6e05820>
+2026-06-20 19:38:09 [INFO   ] web.backend.routers.ws | WebSocket idle timeout for session 20260620-192352-vimax
+2026-06-20 19:39:34 [ERROR  ] web.backend.services.pipeline_service | Rendering failed for session 20260620-192352-vimax
+Traceback (most recent call last):
+  File "/home/admin/ViMax/web/backend/services/pipeline_service.py", line 640, in _run_rendering
+    await asyncio.wait_for(
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/home/admin/ViMax/pipelines/script2video_pipeline.py", line 263, in __call__
+    await asyncio.gather(*tasks)
+  File "/home/admin/ViMax/pipelines/script2video_pipeline.py", line 433, in generate_frames_for_single_camera
+    json.dump(ff_selector_output, f, ensure_ascii=False, indent=4)
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/json/__init__.py", line 179, in dump
+    for chunk in iterable:
+                 ^^^^^^^^
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/json/encoder.py", line 439, in _iterencode
+    o = _default(o)
+        ^^^^^^^^^^^
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/json/encoder.py", line 180, in default
+    raise TypeError(f'Object of type {o.__class__.__name__} '
+TypeError: Object of type RefImageIndicesAndTextPrompt is not JSON serializable
+2026-06-20 19:44:33 [INFO   ] web.backend.routers.ws | WebSocket idle timeout for session 20260620-192352-vimax
+2026-06-20 19:44:41 [INFO   ] web.backend.routers.ws | WebSocket idle timeout for session 20260620-192352-vimax
+2026-06-20 19:46:43 [ERROR  ] web.backend.services.pipeline_service | Rendering failed for session 20260620-192352-vimax
+Traceback (most recent call last):
+  File "/home/admin/ViMax/web/backend/services/pipeline_service.py", line 640, in _run_rendering
+    await asyncio.wait_for(
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/home/admin/ViMax/pipelines/script2video_pipeline.py", line 271, in __call__
+    await asyncio.gather(*tasks)
+  File "/home/admin/ViMax/pipelines/script2video_pipeline.py", line 430, in generate_frames_for_single_camera
+    ff_selector_output = json.load(f)
+                         ^^^^^^^^^^^^
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/json/__init__.py", line 293, in load
+    return loads(fp.read(),
+           ^^^^^^^^^^^^^^^^
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/json/decoder.py", line 338, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/json/decoder.py", line 356, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+2026-06-20 19:51:42 [INFO   ] web.backend.routers.ws | WebSocket idle timeout for session 20260620-192352-vimax
+2026-06-20 19:51:49 [INFO   ] web.backend.routers.ws | WebSocket idle timeout for session 20260620-192352-vimax
+2026-06-20 19:52:22 [ERROR  ] web.backend.services.pipeline_service | Rendering failed for session 20260620-192352-vimax
+Traceback (most recent call last):
+  File "/home/admin/ViMax/web/backend/services/pipeline_service.py", line 640, in _run_rendering
+    await asyncio.wait_for(
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/home/admin/ViMax/pipelines/script2video_pipeline.py", line 271, in __call__
+    await asyncio.gather(*tasks)
+  File "/home/admin/ViMax/pipelines/script2video_pipeline.py", line 430, in generate_frames_for_single_camera
+    ff_selector_output = json.load(f)
+                         ^^^^^^^^^^^^
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/json/__init__.py", line 293, in load
+    return loads(fp.read(),
+           ^^^^^^^^^^^^^^^^
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/json/decoder.py", line 338, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/json/decoder.py", line 356, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+2026-06-20 19:52:48 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 19:52:57 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 19:54:40 [INFO   ] pyscenedetect | Detecting scenes...
+2026-06-20 19:54:42 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 19:54:53 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 19:56:25 [INFO   ] pyscenedetect | Detecting scenes...
+2026-06-20 19:56:26 [INFO   ] pyscenedetect | Splitting video with ffmpeg, output path template:
+  $VIDEO_NAME-Scene-$SCENE_NUMBER.mp4
+2026-06-20 19:56:26 [INFO   ] pyscenedetect | Output folder:
+  $VIDEO_NAME-Scene-$SCENE_NUMBER.mp4
+2026-06-20 19:56:28 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 19:57:54 [INFO   ] pyscenedetect | Detecting scenes...
+2026-06-20 19:57:56 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 19:58:07 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 19:59:39 [INFO   ] pyscenedetect | Detecting scenes...
+2026-06-20 19:59:39 [INFO   ] pyscenedetect | Splitting video with ffmpeg, output path template:
+  $VIDEO_NAME-Scene-$SCENE_NUMBER.mp4
+2026-06-20 19:59:39 [INFO   ] pyscenedetect | Output folder:
+  $VIDEO_NAME-Scene-$SCENE_NUMBER.mp4
+2026-06-20 19:59:41 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 19:59:52 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 20:01:24 [INFO   ] pyscenedetect | Detecting scenes...
+2026-06-20 20:01:24 [INFO   ] pyscenedetect | Splitting video with ffmpeg, output path template:
+  $VIDEO_NAME-Scene-$SCENE_NUMBER.mp4
+2026-06-20 20:01:24 [INFO   ] pyscenedetect | Output folder:
+  $VIDEO_NAME-Scene-$SCENE_NUMBER.mp4
+2026-06-20 20:01:32 [INFO   ] pyscenedetect | Detecting scenes...
+2026-06-20 20:01:34 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 20:02:48 [ERROR  ] web.backend.services.pipeline_service | Rendering timed out for session 20260620-192352-vimax
+Traceback (most recent call last):
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/home/admin/ViMax/pipelines/script2video_pipeline.py", line 271, in __call__
+    await asyncio.gather(*tasks)
+  File "/home/admin/ViMax/pipelines/script2video_pipeline.py", line 345, in generate_frames_for_single_camera
+    transition_video_output = await self.camera_image_generator.generate_transition_video(
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/ViMax/agents/camera_image_generator.py", line 170, in generate_transition_video
+    video_output = await self.video_generator.generate_single_video(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/ViMax/tools/video_generator_dashscope.py", line 220, in generate_single_video
+    result = await self._poll_task(task_id)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/ViMax/tools/video_generator_dashscope.py", line 128, in _poll_task
+    await asyncio.sleep(POLL_INTERVAL)
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/tasks.py", line 665, in sleep
+    return await future
+           ^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/admin/ViMax/web/backend/services/pipeline_service.py", line 640, in _run_rendering
+    await asyncio.wait_for(
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/tasks.py", line 519, in wait_for
+    async with timeouts.timeout(timeout):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/timeouts.py", line 115, in __aexit__
+    raise TimeoutError from exc_val
+TimeoutError
+2026-06-20 20:02:48 [ERROR  ] asyncio | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7fe7037db860>
+2026-06-20 20:02:48 [ERROR  ] asyncio | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7fe7037dae40>
+2026-06-20 20:02:48 [ERROR  ] asyncio | Unclosed connector
+connections: ['deque([(<aiohttp.client_proto.ResponseHandler object at 0x7fe703856690>, 61377.490291442), (<aiohttp.client_proto.ResponseHandler object at 0x7fe7038559d0>, 61379.891228375)])']
+connector: <aiohttp.connector.TCPConnector object at 0x7fe7037dab10>
+2026-06-20 20:06:21 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 20:06:34 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 20:06:34 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 20:06:34 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1024*1024', '720*1280', '1664*928'}, using 1024*1024
+2026-06-20 20:06:35 [WARNING] tools.image_generator_dashscope | DashScope image rate limited, waiting 10s...
+2026-06-20 20:08:33 [ERROR  ] asyncio | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7fe703874830>
+2026-06-20 20:08:33 [ERROR  ] asyncio | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7fe7035d1160>
+2026-06-20 20:08:33 [ERROR  ] asyncio | Unclosed connector
+connections: ['deque([(<aiohttp.client_proto.ResponseHandler object at 0x7fe7036037d0>, 61720.960089992)])']
+connector: <aiohttp.connector.TCPConnector object at 0x7fe7035ce570>
+2026-06-20 22:25:14 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1664*928', '720*1280', '1024*1024'}, using 1024*1024
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1664*928', '720*1280', '1024*1024'}, using 1024*1024
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1664*928', '720*1280', '1024*1024'}, using 1024*1024
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1664*928', '720*1280', '1024*1024'}, using 1024*1024
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1664*928', '720*1280', '1024*1024'}, using 1024*1024
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1664*928', '720*1280', '1024*1024'}, using 1024*1024
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1664*928', '720*1280', '1024*1024'}, using 1024*1024
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1664*928', '720*1280', '1024*1024'}, using 1024*1024
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1664*928', '720*1280', '1024*1024'}, using 1024*1024
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | Size 1600x900 not in valid sizes {'1664*928', '720*1280', '1024*1024'}, using 1024*1024
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | DashScope image rate limited, waiting 10s...
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | DashScope image rate limited, waiting 10s...
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | DashScope image rate limited, waiting 10s...
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | DashScope image rate limited, waiting 10s...
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | DashScope image rate limited, waiting 10s...
+2026-06-20 22:25:25 [WARNING] tools.image_generator_dashscope | DashScope image rate limited, waiting 10s...
+2026-06-20 22:25:26 [WARNING] tools.image_generator_dashscope | DashScope image rate limited, waiting 10s...
+2026-06-20 22:25:35 [ERROR  ] web.backend.services.pipeline_service | Rendering failed for session 20260620-222149-vimax
+Traceback (most recent call last):
+  File "/home/admin/ViMax/web/backend/services/pipeline_service.py", line 640, in _run_rendering
+    await asyncio.wait_for(
+  File "/home/admin/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/home/admin/ViMax/pipelines/script2video_pipeline.py", line 271, in __call__
+    await asyncio.gather(*tasks)
+  File "/home/admin/ViMax/pipelines/script2video_pipeline.py", line 515, in generate_frames_for_single_camera
+    await asyncio.gather(*normal_tasks)
+  File "/home/admin/ViMax/pipelines/script2video_pipeline.py", line 606, in generate_frame_for_single_shot
+    frame_image: ImageOutput = await self.image_generator.generate_single_image(
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/ViMax/tools/image_generator_dashscope.py", line 163, in generate_single_image
+    task_id = await self._submit_task(payload)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/admin/ViMax/tools/image_generator_dashscope.py", line 93, in _submit_task
+    raise RuntimeError(f"DashScope image error: {data.get('code')} - {data.get('message')}")
+RuntimeError: DashScope image error: Throttling.RateQuota - Requests rate limit exceeded, please try again later. For details, see: https://help.aliyun.com/zh/model-studio/error-code#rate-limit
+2026-06-20 22:25:35 [INFO   ] tools.image_generator_dashscope | DashScope image task submitted: 760ea65c-b8a4-407f-b3ce-c6b25a8a65d4
+2026-06-20 22:25:35 [INFO   ] tools.image_generator_dashscope | DashScope image task submitted: 07289258-99af-4979-b5e2-69340f520c08
+2026-06-20 22:25:36 [INFO   ] tools.image_generator_dashscope | DashScope image task submitted: a19a55c7-e21f-4ad7-befb-1b9a0f297417
+2026-06-20 22:25:37 [INFO   ] tools.video_generator_dashscope | DashScope video task submitted: 90315c07-cb0a-458c-a0ec-cfcf0ca1be6b
+2026-06-20 22:25:42 [INFO   ] tools.video_generator_dashscope | DashScope video poll 1: RUNNING
+2026-06-20 22:25:51 [INFO   ] tools.video_generator_dashscope | DashScope video task submitted: 5e7bd942-5ce5-4eac-832c-1eaed28fbde3
+2026-06-20 22:25:56 [INFO   ] tools.video_generator_dashscope | DashScope video poll 1: RUNNING
+2026-06-20 22:26:01 [INFO   ] tools.video_generator_dashscope | DashScope video poll 7: RUNNING
+2026-06-20 22:26:02 [INFO   ] tools.video_generator_dashscope | DashScope video task submitted: 187b7948-8144-4824-a3bb-22067a299c10
+2026-06-20 22:26:07 [INFO   ] tools.video_generator_dashscope | DashScope video poll 1: RUNNING
+2026-06-20 22:26:12 [INFO   ] tools.video_generator_dashscope | DashScope video poll 7: RUNNING
+2026-06-20 22:26:26 [INFO   ] tools.video_generator_dashscope | DashScope video poll 7: RUNNING
+2026-06-20 22:26:31 [INFO   ] tools.video_generator_dashscope | DashScope video poll 13: RUNNING
+2026-06-20 22:26:37 [INFO   ] tools.video_generator_dashscope | DashScope video poll 7: RUNNING
+2026-06-20 22:26:43 [INFO   ] tools.video_generator_dashscope | DashScope video poll 13: RUNNING
+2026-06-20 22:26:57 [INFO   ] tools.video_generator_dashscope | DashScope video poll 13: RUNNING
+2026-06-20 22:26:57 [INFO   ] root | Downloading video from https://dashscope-a717.oss-accelerate.aliyuncs.com/1d/85/20260620/dd382750/127d995f-554a-4b61-b558-9ca7397e018a.mp4?Expires=1782052011&OSSAccessKeyId=LTAI5tJjG6wsHad1Sf7iezX4&Signature=zg7eWMqfMtX%2B2CRAULW5Lv0K%2F7A%3D to /home/admin/ViMax/.working_dir/20260620-222149-vimax/idea2video/scene_0/shots/0/video.mp4
+2026-06-20 22:26:57 [INFO   ] root | Video downloaded successfully to /home/admin/ViMax/.working_dir/20260620-222149-vimax/idea2video/scene_0/shots/0/video.mp4
+2026-06-20 22:27:08 [INFO   ] tools.video_generator_dashscope | DashScope video poll 13: RUNNING
+2026-06-20 22:27:13 [INFO   ] tools.video_generator_dashscope | DashScope video poll 19: SUCCEEDED
+2026-06-20 22:27:13 [INFO   ] root | Downloading video from https://dashscope-a717.oss-accelerate.aliyuncs.com/1d/92/20260620/4e0fb685/90315c07-cb0a-458c-a0ec-cfcf0ca1be6b.mp4?Expires=1782052022&OSSAccessKeyId=LTAI5tJjG6wsHad1Sf7iezX4&Signature=vDvbs7QST3O8TgQ8EDUIhwUVCsU%3D to /home/admin/ViMax/.working_dir/20260620-222149-vimax/idea2video/scene_0/shots/2/video.mp4
+2026-06-20 22:27:14 [INFO   ] root | Video downloaded successfully to /home/admin/ViMax/.working_dir/20260620-222149-vimax/idea2video/scene_0/shots/2/video.mp4
+2026-06-20 22:27:22 [INFO   ] root | Downloading video from https://dashscope-a717.oss-accelerate.aliyuncs.com/1d/73/20260620/4e0fb685/5e7bd942-5ce5-4eac-832c-1eaed28fbde3.mp4?Expires=1782052035&OSSAccessKeyId=LTAI5tJjG6wsHad1Sf7iezX4&Signature=b9Z6GmpAQPt83mi%2BRivSrbPBOeg%3D to /home/admin/ViMax/.working_dir/20260620-222149-vimax/idea2video/scene_0/shots/3/video.mp4
+2026-06-20 22:27:22 [INFO   ] root | Video downloaded successfully to /home/admin/ViMax/.working_dir/20260620-222149-vimax/idea2video/scene_0/shots/3/video.mp4
+2026-06-20 22:27:28 [INFO   ] root | Downloading video from https://dashscope-a717.oss-accelerate.aliyuncs.com/1d/e0/20260620/4e0fb685/187b7948-8144-4824-a3bb-22067a299c10.mp4?Expires=1782052043&OSSAccessKeyId=LTAI5tJjG6wsHad1Sf7iezX4&Signature=3bNk8oZsBZ%2ByUYFeYGA%2FRnloAtI%3D to /home/admin/ViMax/.working_dir/20260620-222149-vimax/idea2video/scene_0/shots/4/video.mp4
+2026-06-20 22:27:28 [INFO   ] root | Video downloaded successfully to /home/admin/ViMax/.working_dir/20260620-222149-vimax/idea2video/scene_0/shots/4/video.mp4
+2026-06-20 22:44:12 [WARNING] root | Retrying decompose_visual_description due to OutputParserException('Invalid json output: {\n  "ff_desc": "近景镜头中，陈望舒的面孔占据整个画面。她戴着细框眼镜，面容轮廓分明，眉头微蹙但整体仍保持着理性与专注，目光锐利，神情冷静而克制。",\n  "ff_vis_char_idxs": [1],\n  "lf_desc": "近景镜头中，同一张面孔，眉头已紧锁，眼中清晰可见好奇、困惑与隐隐的不安交织，嘴唇微微张开，仿佛刚刚颤抖着发声，整体神情显露出理性防线动摇后的波动。",\n  "lf_vis_char_idxs": [1],\n  "motion_desc": "固定镜头。一位戴着细框眼镜、身穿深色职业装的女性起初表情冷静、目光理性。随后，她双眉逐渐紧锁，眼中先后浮现好奇、困惑与不安，嘴唇翕动，喉部微颤，似在发出颤抖的声音。",\n  "variation_type": "small",\n  "variation_reason": "镜头完全固定，仅展现陈望舒面部表情的细微变化，无场景或角色增减，变化幅度小。",\n}\nFor troubleshooting, visit: https://python.langchain.com/docs/troubleshooting/errors/OUTPUT_PARSING_FAILURE ') (Attempt 1)
+2026-06-20 22:44:14 [WARNING] root | Retrying decompose_visual_description due to OutputParserException('Invalid json output: {\n  "ff_desc": "广角定场镜头。现代化保洁间内，日光灯投下冷白色的光，整个房间亮如白昼。画面左前方，一位身着工装、神情局促不安的清洁工站立，目光向下凝望。画面中央的地面上，少年明心身着古装书童服饰，双目紧闭，昏迷不醒。背景中可见整齐排列的清洁工具和几台清洁机器人，构图宽阔，空间层次分明。",\n  "ff_vis_char_idxs": [0],\n  "lf_desc": "与第一帧完全相同。广角定场镜头，现代化保洁间冷白光线不变。左前方的清洁工依然神情局促，站立凝视下方。中央地面上，少年明心仍着古装书童服饰，昏迷静卧。背景中的清洁工具和机器人未有丝毫位移。",\n  "lf_vis_char_idxs": [0],\n  "motion_desc": "静态镜头。无任何摄影机运动，画面内所有元素保持静止。",\n  "variation_type": "small",\n  "variation_reason": "该镜头为完全静态的定场镜头，从第一帧到最后一帧没有任何构图、光线或元素的变化。",\n}\nFor troubleshooting, visit: https://python.langchain.com/docs/troubleshooting/errors/OUTPUT_PARSING_FAILURE ') (Attempt 1)
+2026-06-20 22:50:03 [WARNING] root | Retrying decompose_visual_description due to OutputParserException('Invalid json output: {\n  "ff_desc": "A close-up shot, oriented squarely on Chen Wangshu, who faces the camera directly. Her complexion is pale, brow knitted in shock, eyes wide behind thin-framed glasses. The lenses reflect a swirling, flickering pattern of light points. At the bottom edge of the frame, her right hand grips the edge of a console, knuckles already white. She stands upright, her posture erect but tense.",\n  "ff_vis_char_idxs": [1],\n  "lf_desc": "The same close-up shot, still focused on Chen Wangshu facing the camera. Her face remains pale, with a deeper furrow between her brows. She has leaned forward, her upper body now closer to the lens, as if bracing against pressure. The swirling light reflections continue to flicker in her glasses. Her hand is still clamped on the console edge, knuckles whitened further, arm visibly strained.",\n  "lf_vis_char_idxs": [1],\n  "motion_desc": "Static camera. The woman with thin-framed glasses slowly tilts forward, her head and shoulders drawing nearer to the lens. Throughout the movement, the swirling light points reflected in her glasses flicker ceaselessly. Her grip on the console tightens, the tendons in her hand and forearm becoming more pronounced.",\n  "variation_type": "small",\n  "variation_reason": "The shot remains a static close-up with no change in framing or background. The only alteration is the subject\'s slight forward lean and the subtle intensification of her expression and grip. No new characters or elements appear, and the composition is nearly identical except for the minor shift in posture.",\n}\nFor troubleshooting, visit: https://python.langchain.com/docs/troubleshooting/errors/OUTPUT_PARSING_FAILURE ') (Attempt 1)
+2026-06-20 22:50:05 [WARNING] root | Retrying decompose_visual_description due to OutputParserException('Invalid json output: {\n  "ff_desc": "A wide shot of a busy city street. In the foreground, a woman in a beige coat sits weeping on a wooden bench, her face buried in her hands. Beside her, a man in a dark business suit clutches a briefcase and shouts into his phone, his face tense. Behind them, multiple cars are stopped in the roadway, headlights glowing and horns blaring. Scattered pedestrians run in different directions, some clutching shopping bags, while others stand frozen, staring up at the overcast sky with expressions of disbelief. Trash and abandoned belongings litter the pavement. The lighting is cold and gray, enhancing the raw panic. The composition frames the street from a slightly elevated angle, capturing the breadth of the chaos.",\n  "ff_vis_char_idxs": [],\n  "lf_desc": "The wide shot remains unchanged in framing. The woman in the beige coat now clutches her head with both hands. The man in the suit still shouts into his phone, gesturing sharply with his free hand. Some of the running pedestrians have moved further down the street or partly out of frame, while new figures have entered from the edges, also looking skyward with fear. The stopped cars remain static, horns still blaring. The overall composition and atmosphere of panic persist, with only minor shifts in the positions and postures of the crowd.",\n  "lf_vis_char_idxs": [],\n  "motion_desc": "Static camera. A woman in a beige coat weeps continuously on a bench, her shoulders shaking. A man in a business suit shouts into his phone, waving his free arm. Pedestrians, many clutching bags, run in multiple directions; others stop abruptly and gaze upward with fearful faces. Cars remain stationary in the street, horns honking rhythmically. The entire scene is a constant flurry of urgent, chaotic movement, but the camera remains fixed, offering a detached, wide-angle view of the panic.",\n  "variation_type": "small",\n  "variation_reason": "The shot is a static wide shot of a chaotic street scene. Despite the constant movement of pedestrians, the overall composition, framing, and major elements (bench, cars, key figures) remain largely unchanged from beginning to end, resulting in a small variation.",\n}\nFor troubleshooting, visit: https://python.langchain.com/docs/troubleshooting/errors/OUTPUT_PARSING_FAILURE ') (Attempt 1)
+2026-06-20 22:51:11 [ERROR  ] asyncio | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7f1d4b9cb4a0>
+2026-06-20 22:51:11 [ERROR  ] asyncio | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7f1d4b9bf560>
+2026-06-20 23:04:16 [INFO   ] web.backend.routers.ws | WebSocket idle timeout for session 20260620-223624-deepseek-ai
+2026-06-20 23:09:17 [INFO   ] web.backend.routers.ws | WebSocket idle timeout for session 20260620-223624-deepseek-ai
+2026-06-20 23:11:16 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:11:16 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:11:27 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:11:27 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:11:44 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:11:44 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:12:06 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:12:06 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:14:18 [INFO   ] web.backend.routers.ws | WebSocket idle timeout for session 20260620-223624-deepseek-ai
+2026-06-20 23:15:48 [INFO   ] web.backend.routers.ws | Client event [user:action] session=20260620-231548-vimax payload={"type": "user:action", "action": "start_workflow", "idea": "一个侠客在雨夜中独自行走", "style": "wuxia", "user_requirement": "", "session_id": "20260620-231548-vimax"}
+2026-06-20 23:20:21 [INFO   ] web.backend.main | Startup recovery: marked orphaned session 20260620-231548-vimax as cancelled
+2026-06-20 23:20:32 [INFO   ] web.backend.routers.ws | Client event [user:action] session=20260620-232030-vimax payload={"type": "user:action", "action": "start_workflow", "idea": "一个侠客在雨夜中独自行走", "style": "wuxia", "user_requirement": "", "session_id": "20260620-232030-vimax"}
+2026-06-20 23:20:32 [INFO   ] web.backend.services.agent_service | Workflow: starting step-by-step for session 20260620-232030-vimax
+2026-06-20 23:25:32 [INFO   ] web.backend.routers.ws | Session WebSocket idle timeout for 20260620-232030-vimax
+2026-06-20 23:26:08 [INFO   ] web.backend.main | Startup recovery: marked orphaned session 20260620-232030-vimax as cancelled
+2026-06-20 23:27:52 [WARNING] root | Retrying extract_characters due to OutputParserException('Failed to parse ExtractCharactersResponse from completion {"characters": [{"idx": 0, "identifier_in_scene": "\\u9648\\u5fd7\\u8fdc", "is_visible": true, "static_features": "28\\u5c81\\u9a6c\\u6765\\u897f\\u4e9a\\u534e\\u4eba\\u9752\\u5e74\\uff0c\\u4e2d\\u7b49\\u8eab\\u9ad8\\uff0c\\u4f53\\u578b\\u504f\\u7626\\uff0c\\u80a4\\u8272\\u504f\\u9ec4\\uff0c\\u7559\\u7740\\u5e72\\u51c0\\u7684\\u77ed\\u53d1\\uff0c\\u4e94\\u5b98\\u7aef\\u6b63\\u4f46\\u7565\\u663e\\u6587\\u5f31\\uff0c\\u6234\\u7740\\u4e00\\u526f\\u9ed1\\u6846\\u773c\\u955c\\uff0c\\u773c\\u795e\\u6e29\\u548c\\u800c\\u7565\\u5e26\\u5fe7\\u90c1\\u3002", "dynamic_features": "\\u5728\\u5f71\\u9662\\u65f6\\u7a7f\\u7740\\u6df1\\u84dd\\u8272T\\u6064\\u548c\\u5361\\u5176\\u8272\\u4f11\\u95f2\\u957f\\u88e4\\uff0c\\u968f\\u8eab\\u643a\\u5e26\\u7740\\u4e00\\u4e2a\\u9ed1\\u8272\\u53cc\\u80a9\\u80cc\\u5305\\u3002\\u540e\\u6765\\u5230\\u6f6e\\u6c55\\u540e\\u6362\\u6210\\u4e86\\u6d45\\u8272\\u77ed\\u8896\\u886c\\u886b\\u548c\\u7070\\u8272\\u4e03\\u5206\\u88e4\\uff0c\\u811a\\u8e0f\\u4e00\\u53cc\\u8fd0\\u52a8\\u978b\\u3002"}, {"idx": 1, "identifier_in_scene": "\\u963f\\u5b37", "is_visible": false, "static_features": "\\u5df2\\u6545\\u7684\\u6f6e\\u6c55\\u7c4d\\u534e\\u4eba\\u5973\\u6027\\uff0c\\u5352\\u5e74\\u7ea680\\u4f59\\u5c81\\u3002\\u751f\\u524d\\u9762\\u5bb9\\u6e05\\u7626\\uff0c\\u98a7\\u9aa8\\u5fae\\u9ad8\\uff0c\\u773c\\u775b\\u6df1\\u9083\\uff0c\\u5934\\u53d1\\u82b1\\u767d\\u5e76\\u5e38\\u5e74\\u633d\\u6210\\u53d1\\u9afb\\uff0c\\u53cc\\u624b\\u56e0\\u5e38\\u5e74\\u52b3\\u4f5c\\u800c\\u9aa8\\u8282\\u7c97\\u5927\\u3002\\u8eab\\u6750\\u5a07\\u5c0f\\u4f46\\u4f53\\u6001\\u633a\\u62d4\\uff0c\\u900f\\u9732\\u51fa\\u4e00\\u80a1\\u575a\\u97e7\\u3002", "dynamic_features": null}, {"idx": 2, "identifier_in_scene": "\\u6797\\u5c0f\\u66fc", "is_visible": true, "static_features": "25\\u5c81\\u672c\\u5730\\u5973\\u6027\\uff0c\\u8eab\\u6750\\u5300\\u79f0\\uff0c\\u7559\\u7740\\u9f50\\u8033\\u77ed\\u53d1\\uff0c\\u53d1\\u4e1d\\u81ea\\u7136\\u5fae\\u5377\\u3002\\u76ae\\u80a4\\u56e0\\u5e38\\u5e74\\u5728\\u6237\\u5916\\u5de5\\u4f5c\\u88ab\\u6652\\u6210\\u5065\\u5eb7\\u7684\\u5c0f\\u9ea6\\u8272\\uff0c\\u8138\\u578b\\u5706\\u6da6\\uff0c\\u7b11\\u5bb9\\u723d\\u6717\\uff0c\\u773c\\u775b\\u4e0d\\u5927\\u4f46\\u5f88\\u6709\\u795e\\u91c7\\u3002", "dynamic_features": "\\u4e0a\\u8eab\\u7a7f\\u4e00\\u4ef6\\u767d\\u8272\\u68c9\\u9ebb\\u77ed\\u8896\\u886c\\u886b\\uff0c\\u4e0b\\u8eab\\u914d\\u84dd\\u8272\\u725b\\u4ed4\\u4e03\\u5206\\u88e4\\uff0c\\u811a\\u8e6c\\u4e00\\u53cc\\u8f7b\\u4fbf\\u7684\\u5e06\\u5e03\\u978b\\u3002\\u9a91\\u7740\\u4e00\\u8f86\\u534a\\u65e7\\u7684\\u94f6\\u7070\\u8272\\u7535\\u52a8\\u5c0f\\u6bdb\\u9a74\\uff0c\\u8f66\\u5934\\u6302\\u7740\\u4e2a\\u85e4\\u7f16\\u7bee\\u5b50\\u3002"}, {"idx": 3, "identifier_in_scene": "\\u51af\\u5fb7\\u5174", "is_visible": true, "static_features": "\\u516d\\u5341\\u591a\\u5c81\\u7684\\u8001\\u6728\\u96d5\\u5e08\\u5085\\uff0c\\u8eab\\u5f62\\u504f\\u7626\\uff0c\\u810a\\u80cc\\u5fae\\u9a7c\\uff0c\\u76ae\\u80a4\\u9edd\\u9ed1\\u7c97\\u7cd9\\uff0c\\u53cc\\u624b\\u5e03\\u6ee1\\u8001\\u8327\\u548c\\u7ec6\\u5c0f\\u7684\\u5200\\u75a4\\u3002\\u8138\\u4e0a\\u76b1\\u7eb9\\u6df1\\u523b\\uff0c\\u76ee\\u5149\\u6c89\\u7a33\\u4e13\\u6ce8\\uff0c\\u988c\\u4e0b\\u7559\\u7740\\u7070\\u767d\\u8272\\u7684\\u5c71\\u7f8a\\u80e1\\u3002", "dynamic_features": "\\u8eab\\u7740\\u6d17\\u5f97\\u6709\\u4e9b\\u53d1\\u767d\\u7684\\u6df1\\u84dd\\u8272\\u5de5\\u88c5\\u5939\\u514b\\uff0c\\u91cc\\u9762\\u662f\\u4e00\\u4ef6\\u767d\\u8272\\u6c57\\u886b\\uff0c\\u4e0b\\u8eab\\u662f\\u7070\\u8272\\u957f\\u88e4\\uff0c\\u811a\\u4e0a\\u7a7f\\u7740\\u8001\\u5f0f\\u5851\\u80f6\\u62d6\\u978b\\u3002\\u5de5\\u4f5c\\u65f6\\u4f1a\\u6234\\u4e0a\\u4e00\\u526f\\u8001\\u82b1\\u955c\\u548c\\u7c97\\u5e03\\u56f4\\u88d9\\u3002"}, {"idx": 4, "identifier_in_scene": "\\u51af\\u79c0\\u73cd", "is_visible": true, "static_features": "83\\u5c81\\u8001\\u5987\\u4eba\\uff0c\\u8eab\\u5f62\\u4f5d\\u507b\\u5e72\\u7626\\uff0c\\u6ee1\\u5934\\u94f6\\u53d1\\u7a00\\u758f\\u5e76\\u68b3\\u5411\\u8111\\u540e\\u3002\\u76ae\\u80a4\\u5982\\u540c\\u98ce\\u5e72\\u7684\\u6a58\\u76ae\\uff0c\\u5e03\\u6ee1\\u4e86\\u6df1\\u6df1\\u6d45\\u6d45\\u7684\\u76b1\\u7eb9\\uff0c\\u773c\\u7a9d\\u6df1\\u9677\\uff0c\\u773c\\u795e\\u6d51\\u6d4a\\u65e0\\u7126\\uff0c\\u4f46\\u7709\\u773c\\u95f4\\u4f9d\\u7a00\\u4fdd\\u7559\\u7740\\u51e0\\u5206\\u5e74\\u8f7b\\u65f6\\u6e05\\u79c0\\u7684\\u8f6e\\u5ed3\\u3002", "dynamic_features": "\\u7a7f\\u7740\\u4e00\\u4ef6\\u7d20\\u51c0\\u7684\\u6d45\\u7070\\u8272\\u5bf9\\u895f\\u5e03\\u886b\\uff0c\\u4e0b\\u8eab\\u662f\\u9ed1\\u8272\\u5bbd\\u817f\\u957f\\u88e4\\uff0c\\u811a\\u7a7f\\u4e00\\u53cc\\u65e7\\u9ed1\\u5e03\\u978b\\u3002\\u5750\\u5728\\u5802\\u5c4b\\u524d\\u7684\\u85e4\\u6905\\u4e0a\\uff0c\\u8eab\\u4e0a\\u76d6\\u7740\\u4e00\\u6761\\u8584\\u8584\\u7684\\u892a\\u8272\\u6bdb\\u6bef\\u3002"}]}. Got: 1 validation error for ExtractCharactersResponse\ncharacters.1.dynamic_features\n  Input should be a valid string [type=string_type, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.11/v/string_type\nFor troubleshooting, visit: https://python.langchain.com/docs/troubleshooting/errors/OUTPUT_PARSING_FAILURE ') (Attempt 1)
+2026-06-20 23:31:16 [INFO   ] web.backend.routers.ws | WebSocket idle timeout for session 20260620-232615-vimax
+2026-06-20 23:31:16 [INFO   ] web.backend.routers.ws | Session WebSocket idle timeout for 20260620-232616-vimax
+2026-06-20 23:31:21 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:31:23 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:31:23 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:32:02 [INFO   ] web.backend.main | Startup recovery: marked orphaned session 20260620-232615-vimax as cancelled
+2026-06-20 23:32:02 [INFO   ] web.backend.main | Startup recovery: marked orphaned session 20260620-232616-vimax as cancelled
+2026-06-20 23:32:11 [INFO   ] web.backend.routers.ws | Client event [user:action] session=20260620-233211-vimax payload={"type": "user:action", "action": "start_workflow", "idea": "雨夜", "style": "wuxia", "user_requirement": "", "session_id": "20260620-233211-vimax"}
+2026-06-20 23:32:11 [INFO   ] web.backend.services.agent_service | Workflow: starting step-by-step for session 20260620-233211-vimax
+2026-06-20 23:32:11 [INFO   ] web.backend.services.agent_service | Workflow: building chat model for 20260620-233211-vimax
+2026-06-20 23:32:11 [INFO   ] web.backend.services.agent_service | Workflow: chat model ready for 20260620-233211-vimax
+2026-06-20 23:32:11 [INFO   ] web.backend.services.agent_service | Workflow: creating pipeline for 20260620-233211-vimax
+2026-06-20 23:32:11 [INFO   ] web.backend.services.agent_service | Workflow: pipeline ready for 20260620-233211-vimax
+2026-06-20 23:32:11 [INFO   ] web.backend.services.agent_service | Workflow: executing step 'story_generation' for 20260620-233211-vimax
+2026-06-20 23:32:13 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:32:13 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:32:28 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:32:28 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:32:47 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-20 23:32:47 [INFO   ] httpx | HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"

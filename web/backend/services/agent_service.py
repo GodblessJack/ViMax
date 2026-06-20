@@ -340,13 +340,18 @@ class AgentService:
 
             # Update stage
             svc._index.update_stage(session_id, "narrative_planning", "Step-by-step planning started")
+            logger.info("Workflow: starting step-by-step for session %s", session_id)
 
+            logger.info("Workflow: building chat model for %s", session_id)
             chat_model = psvc._build_chat_model()
-            dummy = psvc._build_image_generator.__self__.__class__() if False else _get_dummy_gen(psvc)
+            logger.info("Workflow: chat model ready for %s", session_id)
+            from web.backend.services.pipeline_service import _UnavailableGenerator
+            dummy = _UnavailableGenerator()
             working_dir = str(svc._index.working_dir(session_id) / "idea2video")
             import os
             os.makedirs(working_dir, exist_ok=True)
 
+            logger.info("Workflow: creating pipeline for %s", session_id)
             from pipelines.idea2video_pipeline import Idea2VideoPipeline
             pipeline = Idea2VideoPipeline(
                 chat_model=chat_model,
@@ -354,6 +359,7 @@ class AgentService:
                 video_generator=dummy,
                 working_dir=working_dir,
             )
+            logger.info("Workflow: pipeline ready for %s", session_id)
 
             steps = [
                 {
@@ -404,11 +410,13 @@ class AgentService:
                 })
 
                 # Execute step
+                logger.info("Workflow: executing step '%s' for %s", step["name"], session_id)
                 try:
                     result = await asyncio.wait_for(
                         step["run"](),
                         timeout=step["timeout"],
                     )
+                    logger.info("Workflow: step '%s' completed for %s", step["name"], session_id)
                 except asyncio.TimeoutError:
                     await self.broadcast(session_id, {
                         "type": "step:error",
@@ -489,20 +497,16 @@ class AgentService:
             })
 
         except asyncio.CancelledError:
+            logger.info("Workflow cancelled for %s", session_id)
             svc = get_session_service()
             svc._index.update_stage(session_id, "cancelled", "Workflow cancelled")
         except Exception as exc:
             logger.exception("Workflow failed for session %s", session_id)
-            await self.broadcast(session_id, {
-                "type": "pipeline:error",
-                "stage": "error",
-                "error": f"工作流出错: {exc}",
-            })
-
-
-def _get_dummy_gen(psvc: Any) -> Any:
-    """Return the dummy image/video generator used during planning."""
-    class _DummyGen:
-        async def generate(self, *args: Any, **kwargs: Any) -> Any:
-            return None
-    return _DummyGen()
+            try:
+                await self.broadcast(session_id, {
+                    "type": "pipeline:error",
+                    "stage": "error",
+                    "error": f"工作流出错: {exc}",
+                })
+            except Exception:
+                logger.exception("Failed to broadcast workflow error for %s", session_id)

@@ -63,14 +63,13 @@ class WorkspaceService:
     def get_thumbnail_url(self, session_id: str) -> str | None:
         """Return an API thumbnail URL for the session's first frame, if it exists.
 
-        Checks ``idea2video/scene_0/shots/0/first_frame.png`` inside the
-        session working directory.
+        Checks both ``idea2video`` and ``script2video`` pipeline paths.
         """
-        thumbnail_path = self.resolve_path(
-            session_id, "idea2video/scene_0/shots/0/first_frame.png"
-        )
-        if thumbnail_path is not None:
-            return f"/api/files/{session_id}/idea2video/scene_0/shots/0/first_frame.png"
+        for pipeline in ("idea2video", "script2video"):
+            candidate = f"{pipeline}/scene_0/shots/0/first_frame.png"
+            thumbnail_path = self.resolve_path(session_id, candidate)
+            if thumbnail_path is not None:
+                return f"/api/files/{session_id}/{candidate}"
         return None
 
     def mime_type(self, file_path: Path) -> str:

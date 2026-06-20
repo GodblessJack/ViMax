@@ -40,7 +40,7 @@ class CharacterPortraitsGenerator:
         self.image_generator = image_generator
 
 
-    @retry(stop=stop_after_attempt(3), after=after_func, reraise=True)
+    @retry(stop=stop_after_attempt(2), after=after_func, reraise=True)
     async def generate_front_portrait(
         self,
         character: CharacterInScene,
@@ -58,7 +58,7 @@ class CharacterPortraitsGenerator:
         )
         return image_output
 
-    @retry(stop=stop_after_attempt(3), after=after_func, reraise=True)
+    @retry(stop=stop_after_attempt(2), after=after_func, reraise=True)
     async def generate_side_portrait(
         self,
         character: CharacterInScene,
@@ -75,7 +75,7 @@ class CharacterPortraitsGenerator:
         return image_output
 
 
-    @retry(stop=stop_after_attempt(3), after=after_func, reraise=True)
+    @retry(stop=stop_after_attempt(2), after=after_func, reraise=True)
     async def generate_back_portrait(
         self,
         character: CharacterInScene,

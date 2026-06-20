@@ -2,14 +2,7 @@ import { useState } from 'react'
 import { Sparkles, Lightbulb, MessageCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { StyleOption } from '@/lib/types'
-
-export const PRESET_STYLES: StyleOption[] = [
-  { key: 'wuxia', name: '武侠风', emoji: '🎭', description: '武侠江湖，快意恩仇' },
-  { key: 'ancient', name: '古风', emoji: '🏛️', description: '古色古香，典雅韵味' },
-  { key: 'modern', name: '现代风', emoji: '🌆', description: '都市生活，真实质感' },
-  { key: 'suspense', name: '悬疑风', emoji: '🔮', description: '紧张氛围，引人入胜' },
-  { key: 'comedy', name: '喜剧风', emoji: '😂', description: '轻松幽默，欢乐氛围' },
-]
+import { PRESET_STYLES } from '@/lib/constants'
 
 type Step1Props = {
   idea: string
@@ -118,7 +111,8 @@ export default function Step1IdeaInput({
       <button
         onClick={onNext}
         disabled={!idea.trim() || loading}
-        className="w-full rounded-xl bg-primary py-3 text-primary-foreground hover:bg-[#E84A4F] disabled:opacity-40 disabled:cursor-not-allowed transition-all font-semibold shadow-sm hover:shadow-md active:scale-[0.99]"
+        title={!idea.trim() ? '请先输入创意描述' : ''}
+        className="w-full rounded-xl bg-primary py-3 text-primary-foreground hover:brightness-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all font-semibold shadow-sm hover:shadow-md active:scale-[0.99]"
       >
         {loading ? (
           <span className="flex items-center justify-center gap-2">

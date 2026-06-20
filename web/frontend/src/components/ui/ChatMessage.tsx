@@ -49,11 +49,11 @@ function renderText(text: string) {
       ))
     }
     if (seg.type === 'bold') {
-      return <strong key={i}>{seg.content}</strong>
+      return <strong key={`bold-${i}`}>{seg.content}</strong>
     }
     if (seg.type === 'code') {
       return (
-        <code key={i} className="px-1 py-0.5 rounded bg-muted text-[0.85em] font-mono">
+        <code key={`code-${i}`} className="px-1 py-0.5 rounded bg-muted text-[0.85em] font-mono">
           {seg.content}
         </code>
       )

@@ -35,6 +35,7 @@ export default function GlobalAIPanel() {
     return [{ role: 'ai', text: greeting }]
   })
   const [input, setInput] = useState('')
+  const [sending, setSending] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -67,10 +68,11 @@ export default function GlobalAIPanel() {
   }
 
   async function send() {
-    if (!input.trim()) return
+    if (!input.trim() || sending) return
     const userMsg = input.trim()
     setInput('')
     setMessages(prev => [...prev, { role: 'user', text: userMsg }])
+    setSending(true)
 
     try {
       const res = await fetch('/api/chat', {
@@ -86,6 +88,8 @@ export default function GlobalAIPanel() {
       }
     } catch {
       handleQuickAction(userMsg)
+    } finally {
+      setSending(false)
     }
   }
 
@@ -94,7 +98,7 @@ export default function GlobalAIPanel() {
       <div className="border-l border-r bg-sidebar flex flex-col items-center py-3 w-11 shrink-0 gap-3">
         <button
           onClick={() => setCollapsed(false)}
-          className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-[#E84A4F] transition-colors"
+          className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:brightness-90 transition-colors"
           title="打开 AI 助手"
         >
           <Wand2 className="h-4 w-4" />
@@ -176,8 +180,9 @@ export default function GlobalAIPanel() {
           />
           <button
             type="submit"
-            disabled={!input.trim()}
-            className="rounded-xl bg-primary px-3 py-2 text-primary-foreground hover:bg-[#E84A4F] disabled:opacity-40 transition-all shrink-0"
+            disabled={!input.trim() || sending}
+            aria-label="发送消息"
+            className="rounded-xl bg-primary px-3 py-2 text-primary-foreground hover:brightness-90 disabled:opacity-40 transition-all shrink-0"
           >
             <Send className="h-4 w-4" />
           </button>

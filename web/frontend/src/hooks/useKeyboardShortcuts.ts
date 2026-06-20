@@ -37,9 +37,11 @@ export function useKeyboardShortcuts() {
         e.preventDefault()
         navigate('/create')
       }
-      // Escape: go back
+      // Escape: close panels/modals only (don't navigate away from SPA)
       if (e.key === 'Escape') {
-        navigate(-1)
+        // Dispatch a custom event that components can listen to
+        // This prevents navigating out of the SPA entirely
+        window.dispatchEvent(new CustomEvent('escape-pressed'))
       }
     }
 

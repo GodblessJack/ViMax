@@ -1,32 +1,26 @@
 chat_model:
   init_args:
-    model: google/gemini-2.5-flash-lite-preview-09-2025
+    model: deepseek-chat
     model_provider: openai
-    api_key:
-    base_url: https://openrouter.ai/api/v1
-  # Rate limits for chat model API calls
-  # Set to null to disable rate limiting for this service
+    api_key: sk-043194fdb7384b52b95c2482f3d129d3
+    base_url: https://api.deepseek.com/v1
   max_requests_per_minute: 500
   max_requests_per_day: 2000
 
 image_generator:
-  class_path: tools.ImageGeneratorNanobananaGoogleAPI
+  class_path: tools.ImageGeneratorDashScope
   init_args:
     api_key:
-  # Rate limits for image generation API calls
-  # Set to null to disable rate limiting for this service
+    model: wanx2.1-t2i-turbo
   max_requests_per_minute: 10
   max_requests_per_day: 500
 
-
 video_generator:
-  class_path: tools.VideoGeneratorVeoGoogleAPI
+  class_path: tools.VideoGeneratorDashScope
   init_args:
     api_key:
-  # Rate limits for video generation API calls
-  # Set to null to disable rate limiting for this service
+    t2v_model: wan2.5-t2v-preview
   max_requests_per_minute: 2
   max_requests_per_day: 10
-
 
 working_dir: .working_dir/idea2video

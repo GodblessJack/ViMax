@@ -153,6 +153,16 @@ class ReferenceImageSelector:
         available_image_path_and_text_pairs: List[Tuple[str, str]],
         frame_description: str,
     ):
+        # Guard: skip LLM selection when there are too few reference images.
+        # The multimodal path (triggered when < 8 images) sends images to the LLM
+        # which fails with text-only models like DeepSeek.  When the set is small
+        # we just use everything thatʼs available.
+        if len(available_image_path_and_text_pairs) < 8:
+            return RefImageIndicesAndTextPrompt(
+                ref_image_indices=list(range(len(available_image_path_and_text_pairs))),
+                text_prompt=frame_description,
+            )
+
         filtered_image_path_and_text_pairs = available_image_path_and_text_pairs
 
         # 1. filter images using text-only model

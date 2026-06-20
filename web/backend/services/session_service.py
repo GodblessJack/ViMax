@@ -75,8 +75,15 @@ class SessionService:
         ]
 
     def mark_cancelled(self, session_id: str, summary: str = "Pipeline cancelled") -> None:
-        """Mark a session's stage as 'cancelled' with the given summary."""
-        self._index.update_stage(session_id, "cancelled", summary)
+        """Mark a session's stage as 'cancelled' with the given summary.
+
+        Silently ignores unknown session IDs — the session may have been
+        deleted between the time it was discovered and cancellation.
+        """
+        try:
+            self._index.update_stage(session_id, "cancelled", summary)
+        except KeyError:
+            pass
 
     def create_session(
         self,

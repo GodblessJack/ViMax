@@ -13,7 +13,21 @@ from langchain.chat_models import init_chat_model
 from tools.render_backend import RenderBackend
 from utils.provider_presets import resolve_chat_model_config
 from utils.text import safe_path_component
+
+
+def _select_pairs(pairs, indices):
+    """Select items from *pairs* by *indices*, rejecting out-of-range values."""
+    invalid = [i for i in indices if i < 0 or i >= len(pairs)]
+    if invalid:
+        raise ValueError(f"ref_image_indices out of range: {invalid} (have {len(pairs)} images)")
+    return [pairs[i] for i in indices]
 from utils.video import concatenate_video_files
+
+
+# ── Transition video retry budget (cost control) ────────────────────
+# Each transition video costs ~¥1.5-3.0 via DashScope.  We cap retries
+# at 2 and fall back to a static image (~¥0.12) on persistent failure.
+_TRANSITION_VIDEO_MAX_RETRIES = 2
 
 
 def _pipeline_print(quiet: bool, message: str) -> None:
@@ -316,29 +330,85 @@ class Script2VideoPipeline:
                     print(f"🚀 Skipped generating transition video for shot {first_shot_idx} from shot {parent_shot_idx}, already exists.")
                     _emit_render_progress(progress, "transition_video_exists", f"Transition video for shot {first_shot_idx} already exists", {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "parent_shot_idx": parent_shot_idx, "path": transition_video_path})
                 else:
-                    print(f"🖼️ Starting transition video generation for shot {first_shot_idx} from shot {parent_shot_idx}...")
-                    _emit_render_progress(progress, "transition_video_start", f"Generating transition video for shot {first_shot_idx}", {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "parent_shot_idx": parent_shot_idx})
-                    transition_video_output = await self.camera_image_generator.generate_transition_video(
-                        first_shot_visual_desc=shot_descriptions[parent_shot_idx].visual_desc,
-                        second_shot_visual_desc=shot_descriptions[first_shot_idx].visual_desc,
-                        first_shot_ff_path=parent_shot_ff_path,
-                        progress=_scoped_progress(progress, camera_idx=camera.idx, shot_idx=first_shot_idx, parent_shot_idx=parent_shot_idx, artifact="transition_video"),
-                    )
-                    transition_video_output.save(transition_video_path)
-                    print(f"☑️ Generated transition video for shot {first_shot_idx} from shot {parent_shot_idx}, saved to {transition_video_path}.")
-                    _emit_render_progress(progress, "transition_video_done", f"Transition video for shot {first_shot_idx} generated", {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "parent_shot_idx": parent_shot_idx, "path": transition_video_path})
+                    # ── Transition video with cost-aware retry + fallback ──
+                    # Each DashScope video call costs ~¥1.5-3.0.  We retry at most
+                    # _TRANSITION_VIDEO_MAX_RETRIES times on transient errors, then
+                    # fall back to a cheap static image (~¥0.12) instead of a full video.
+                    transition_video_output = None
+                    last_error = None
+                    for attempt in range(1, _TRANSITION_VIDEO_MAX_RETRIES + 1):
+                        try:
+                            print(f"🖼️ Starting transition video generation for shot {first_shot_idx} from shot {parent_shot_idx} (attempt {attempt}/{_TRANSITION_VIDEO_MAX_RETRIES})...")
+                            _emit_render_progress(progress, "transition_video_start",
+                                f"Generating transition video for shot {first_shot_idx} (attempt {attempt})",
+                                {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "parent_shot_idx": parent_shot_idx, "attempt": attempt})
+                            transition_video_output = await self.camera_image_generator.generate_transition_video(
+                                first_shot_visual_desc=shot_descriptions[parent_shot_idx].visual_desc,
+                                second_shot_visual_desc=shot_descriptions[first_shot_idx].visual_desc,
+                                first_shot_ff_path=parent_shot_ff_path,
+                                progress=_scoped_progress(progress, camera_idx=camera.idx, shot_idx=first_shot_idx, parent_shot_idx=parent_shot_idx, artifact="transition_video"),
+                            )
+                            break  # success — exit retry loop
+                        except Exception as exc:
+                            last_error = exc
+                            if attempt < _TRANSITION_VIDEO_MAX_RETRIES:
+                                wait_s = 5 * attempt
+                                logging.warning(
+                                    "Transition video for shot %s (attempt %d/%d) failed: %s. Retrying in %ds...",
+                                    first_shot_idx, attempt, _TRANSITION_VIDEO_MAX_RETRIES, exc, wait_s)
+                                _emit_render_progress(progress, "transition_video_retry",
+                                    f"Transition video attempt {attempt} failed, retrying...",
+                                    {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "attempt": attempt, "error": str(exc)[:200]})
+                                await asyncio.sleep(wait_s)
+                            else:
+                                logging.error(
+                                    "Transition video for shot %s exhausted all %d retries: %s",
+                                    first_shot_idx, _TRANSITION_VIDEO_MAX_RETRIES, exc)
+
+                    if transition_video_output is not None:
+                        transition_video_output.save(transition_video_path)
+                        print(f"☑️ Generated transition video for shot {first_shot_idx} from shot {parent_shot_idx}, saved to {transition_video_path}.")
+                        _emit_render_progress(progress, "transition_video_done",
+                            f"Transition video for shot {first_shot_idx} generated",
+                            {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "parent_shot_idx": parent_shot_idx, "path": transition_video_path})
+                    else:
+                        # All video retries exhausted — fall back to static image
+                        logging.warning(
+                            "Falling back to static image for transition (shot %s ← %s). Saves ~¥1.5-3.0 vs video.",
+                            first_shot_idx, parent_shot_idx)
+                        _emit_render_progress(progress, "transition_video_fallback",
+                            f"Transition video failed, using static image fallback (cost save: ~¥1.5-3.0)",
+                            {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "parent_shot_idx": parent_shot_idx, "fallback_reason": str(last_error)[:200] if last_error else "unknown"})
+                        # The fallback image will be used directly as new_camera_image below
+                        # (transition_video_path won't exist, triggering the fallback path)
 
                 new_camera_image_path = os.path.join(self.working_dir, "shots", f"{first_shot_idx}", f"new_camera_{camera.idx}.png")
                 if os.path.exists(new_camera_image_path):
                     print(f"🚀 Skipped generating new camera image for shot {first_shot_idx}, already exists.")
                     _emit_render_progress(progress, "new_camera_image_exists", f"New camera image for shot {first_shot_idx} already exists", {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "path": new_camera_image_path})
-                else:
-                    print(f"🖼️ Starting new camera image generation for shot {first_shot_idx}...")
+                elif os.path.exists(transition_video_path):
+                    print(f"🖼️ Starting new camera image generation for shot {first_shot_idx} from transition video...")
                     _emit_render_progress(progress, "new_camera_image_start", f"Extracting new camera image for shot {first_shot_idx}", {"camera_idx": camera.idx, "shot_idx": first_shot_idx})
                     new_camera_image = self.camera_image_generator.get_new_camera_image(transition_video_path)
                     new_camera_image.save(new_camera_image_path)
-                    print(f"☑️ Generated new camera image for shot {first_shot_idx} (not completed), saved to {new_camera_image_path}.")
+                    print(f"☑️ Generated new camera image for shot {first_shot_idx} from transition video, saved to {new_camera_image_path}.")
                     _emit_render_progress(progress, "new_camera_image_done", f"New camera image for shot {first_shot_idx} extracted", {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "path": new_camera_image_path})
+                else:
+                    # Transition video generation failed (all retries exhausted).
+                    # Fall back to a cheap static transition image (~¥0.12 vs ~¥1.5-3.0).
+                    print(f"🖼️ Transition video unavailable, generating static fallback image for shot {first_shot_idx}...")
+                    _emit_render_progress(progress, "new_camera_image_fallback",
+                        f"Using static image fallback for new camera reference (cost ~¥0.12 vs ~¥1.5-3.0 for video)",
+                        {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "parent_shot_idx": parent_shot_idx})
+                    fallback_image = await self.camera_image_generator.generate_transition_image_fallback(
+                        first_shot_visual_desc=shot_descriptions[parent_shot_idx].visual_desc,
+                        second_shot_visual_desc=shot_descriptions[first_shot_idx].visual_desc,
+                        first_shot_ff_path=parent_shot_ff_path,
+                        progress=_scoped_progress(progress, camera_idx=camera.idx, shot_idx=first_shot_idx, parent_shot_idx=parent_shot_idx, artifact="transition_fallback_image"),
+                    )
+                    fallback_image.save(new_camera_image_path)
+                    print(f"☑️ Generated static fallback image for shot {first_shot_idx}, saved to {new_camera_image_path}.")
+                    _emit_render_progress(progress, "new_camera_image_done", f"Static fallback image for shot {first_shot_idx} saved", {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "path": new_camera_image_path, "fallback": True})
 
                 # Offer the new-camera image regardless of whether it was just
                 # generated or already on disk: when this sat in the else branch
@@ -367,13 +437,14 @@ class Script2VideoPipeline:
                         available_image_path_and_text_pairs=available_image_path_and_text_pairs,
                         frame_description=shot_descriptions[first_shot_idx].ff_desc
                     )
+                    ff_selector_output = ff_selector_output.model_dump()
                     with open(ff_selector_output_path, 'w', encoding='utf-8') as f:
                         json.dump(ff_selector_output, f, ensure_ascii=False, indent=4)
 
                     print(f"☑️ Selected reference images and generated prompt for first_frame of shot {first_shot_idx}, saved to {ff_selector_output_path}.")
                     _emit_render_progress(progress, "frame_prompt_done", f"Selected references for first frame of shot {first_shot_idx}", {"camera_idx": camera.idx, "shot_idx": first_shot_idx, "frame_type": "first_frame", "path": ff_selector_output_path})
 
-                reference_image_path_and_text_pairs, prompt = ff_selector_output["reference_image_path_and_text_pairs"], ff_selector_output["text_prompt"]
+                reference_image_path_and_text_pairs, prompt = _select_pairs(available_image_path_and_text_pairs, ff_selector_output["ref_image_indices"]), ff_selector_output["text_prompt"]
                 prefix_prompt = ""
                 for i, (image_path, text) in enumerate(reference_image_path_and_text_pairs):
                     prefix_prompt += f"Image {i}: {text}\n"
@@ -519,12 +590,13 @@ class Script2VideoPipeline:
                     available_image_path_and_text_pairs=available_image_path_and_text_pairs,
                     frame_description=frame_desc
                 )
+                selector_output = selector_output.model_dump()
                 with open(selector_output_path, 'w', encoding='utf-8') as f:
                     json.dump(selector_output, f, ensure_ascii=False, indent=4)
                 print(f"☑️ Selected reference images and generated prompt for {frame_type} frame of shot {shot_idx}, saved to {selector_output_path}.")
                 _emit_render_progress(progress, "frame_prompt_done", f"Selected references for {frame_type} of shot {shot_idx}", {"shot_idx": shot_idx, "frame_type": frame_type, "path": selector_output_path})
 
-            reference_image_path_and_text_pairs, prompt = selector_output["reference_image_path_and_text_pairs"], selector_output["text_prompt"]
+            reference_image_path_and_text_pairs, prompt = _select_pairs(available_image_path_and_text_pairs, selector_output["ref_image_indices"]), selector_output["text_prompt"]
             prefix_prompt = ""
             for i, (image_path, text) in enumerate(reference_image_path_and_text_pairs):
                 prefix_prompt += f"Image {i}: {text}\n"

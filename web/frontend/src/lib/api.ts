@@ -1,17 +1,42 @@
 // ── API Client ─────────────────────────────────────────────────────
 
-const BASE = '/api'
+import { logger } from './logger'
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-  })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(body || `${res.status} ${res.statusText}`)
+const BASE = '/api'
+const DEFAULT_TIMEOUT = 30_000  // 30 seconds
+
+async function request<T>(path: string, options?: RequestInit & { timeout?: number }): Promise<T> {
+  const { timeout = DEFAULT_TIMEOUT, ...fetchOptions } = options || {}
+  const method = fetchOptions.method || 'GET'
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeout)
+  const start = performance.now()
+
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      ...fetchOptions,
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', ...fetchOptions.headers },
+    })
+    const duration = Math.round(performance.now() - start)
+    if (!res.ok) {
+      const body = await res.text()
+      logger.apiError(method, path, { status: res.status, body })
+      throw new Error(body || `${res.status} ${res.statusText}`)
+    }
+    logger.api(method, path, res.status, duration)
+    const text = await res.text()
+    if (!text) return undefined as T
+    return JSON.parse(text) as T
+  } catch (err) {
+    const duration = Math.round(performance.now() - start)
+    if (err instanceof TypeError && err.message === 'Failed to fetch') {
+      logger.apiError(method, path, { reason: 'network-error', durationMs: duration })
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
   }
-  return res.json()
 }
 
 // ── Sessions ───────────────────────────────────────────────────────

@@ -33,7 +33,7 @@ export class ErrorBoundary extends Component<Props, State> {
               this.setState({ error: null })
               window.location.reload()
             }}
-            className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-[#E84A4F] transition-all"
+            className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:brightness-90 transition-all"
           >
             <RefreshCw className="h-4 w-4" />
             刷新页面

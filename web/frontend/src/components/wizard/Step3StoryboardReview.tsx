@@ -37,7 +37,7 @@ export default function Step3StoryboardReview({
         <div className="flex gap-1.5 mb-5 overflow-x-auto pb-1">
           {scenes.map((scene, i) => (
             <button
-              key={i}
+              key={`scene-tab-${i}`}
               onClick={() => {
                 onSceneChange(i)
                 setExpanded(null)
@@ -79,9 +79,10 @@ export default function Step3StoryboardReview({
       ) : currentScene && currentScene.shots.length > 0 ? (
         <div className="space-y-1.5 mb-6">
           {currentScene.shots.map((s, i) => (
-            <div key={i} className="rounded-xl border bg-card overflow-hidden transition-all hover:shadow-sm">
+            <div key={`shot-${i}`} className="rounded-xl border bg-card overflow-hidden transition-all hover:shadow-sm">
               <button
                 onClick={() => setExpanded(expanded === i ? null : i)}
+                aria-expanded={expanded === i}
                 className="flex items-center gap-3 w-full p-3.5 text-left hover:bg-muted/30 transition-colors"
               >
                 <span className="text-xs font-mono font-semibold text-primary w-7 shrink-0">
@@ -137,7 +138,7 @@ export default function Step3StoryboardReview({
         <button
           onClick={onConfirm}
           disabled={!currentScene || currentScene.shots.length === 0}
-          className="flex-1 rounded-xl bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-[#E84A4F] transition-all shadow-sm disabled:opacity-40"
+          className="flex-1 rounded-xl bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground hover:brightness-90 transition-all shadow-sm disabled:opacity-40"
         >
           开始生成视频 →
         </button>

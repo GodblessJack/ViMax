@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { LayoutDashboard, Video, FolderOpen, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
@@ -14,9 +14,14 @@ const NAV_ITEMS = [
 
 export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   useKeyboardShortcuts()
+  const location = useLocation()
   const [activeCount, setActiveCount] = useState(0)
 
   useEffect(() => {
+    if (location.pathname !== '/') {
+      setActiveCount(0)
+      return
+    }
     async function check() {
       try {
         const res = await listSessions({ limit: 50 })
@@ -29,7 +34,7 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
     check()
     const timer = setInterval(check, 30000) // poll every 30s
     return () => clearInterval(timer)
-  }, [])
+  }, [location.pathname])
 
   return (
     <aside className={cn(

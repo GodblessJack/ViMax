@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, Play, Download, Trash2, Edit3 } from 'lucide-react'
+import { Search, Play, Download, Trash2, Edit3, AlertTriangle, RefreshCw } from 'lucide-react'
 import { listWorks, deleteSession, getFileUrl, getWorkDownloadUrl } from '@/lib/api'
 import type { WorkItem } from '@/lib/types'
 import { ListRowSkeleton } from '@/components/ui/Skeleton'
@@ -16,21 +16,35 @@ export default function MyWorksPage() {
   const [works, setWorks] = useState<WorkItem[]>([])
   const [total, setTotal] = useState(0)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Debounce search input by 300ms
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [search])
 
   useEffect(() => {
+    let cancelled = false
     async function load() {
+      setError(null)
       setLoading(true)
       try {
-        const res = await listWorks({ search: search || undefined, limit: 50 })
+        const res = await listWorks({ search: debouncedSearch || undefined, limit: 50 })
+        if (cancelled) return
         setWorks(res.items)
         setTotal(res.total)
-      } catch { /* API not ready */ }
-      finally { setLoading(false) }
+      } catch { if (!cancelled) setError('无法加载作品列表，请检查网络连接后重试') }
+      finally { if (!cancelled) setLoading(false) }
     }
     load()
-  }, [search])
+    return () => { cancelled = true }
+  }, [debouncedSearch])
 
   const handleDelete = useCallback(async () => {
     if (!deleteTarget) return
@@ -62,8 +76,20 @@ export default function MyWorksPage() {
         />
       </div>
 
-      {/* Loading */}
-      {loading ? (
+      {/* State: error → loading → empty → populated */}
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
+          <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-3" />
+          <p className="text-sm text-destructive mb-4">{error}</p>
+          <button
+            onClick={() => { setError(null); setLoading(true); setDebouncedSearch(''); setSearch('') }}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            <RefreshCw className="h-4 w-4" />
+            重试
+          </button>
+        </div>
+      ) : loading ? (
         <div className="space-y-2">
           {Array.from({ length: 5 }).map((_, i) => <ListRowSkeleton key={i} />)}
         </div>
@@ -75,7 +101,7 @@ export default function MyWorksPage() {
             !search ? (
               <button
                 onClick={() => navigate('/create')}
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-[#E84A4F] transition-colors"
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:brightness-90 transition-colors"
               >
                 创建第一个短剧
               </button>

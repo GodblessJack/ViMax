@@ -18,6 +18,8 @@ def _get_service():
 async def start_planning(body: PipelinePlanRequest):
     try:
         return await _get_service().start_planning(body)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 

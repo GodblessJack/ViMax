@@ -79,13 +79,15 @@ export default function Step2PlanningReview({
 
           {/* Characters */}
           <div className="rounded-xl border bg-card p-5 mb-4">
-            <h3 className="font-semibold flex items-center gap-2 mb-3">
-              <span className="text-lg">👥</span> 角色 ({characters.length})
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold flex items-center gap-2">
+                <span className="text-lg">👥</span> 角色 ({characters.length})
+              </h3>
+            </div>
             <div className="flex gap-2 flex-wrap">
-              {characters.map(c => (
+              {characters.map((c, i) => (
                 <div
-                  key={c.idx}
+                  key={`char-${i}`}
                   className="rounded-lg bg-muted px-3.5 py-2 text-sm border border-border/50"
                 >
                   <span className="font-semibold">{c.identifier}</span>
@@ -138,7 +140,7 @@ export default function Step2PlanningReview({
             <button
               onClick={onConfirm}
               disabled={loading || !story}
-              className="flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-[#E84A4F] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+              className="flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground hover:brightness-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
             >
               确认，查看分镜
               <ChevronRight className="h-4 w-4" />
@@ -178,7 +180,7 @@ function PlanningLoading({ onCancel }: { onCancel?: () => void }) {
             const isPast = i < stageIndex
             return (
               <div
-                key={i}
+                key={`plan-stage-${i}`}
                 className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm transition-all duration-500 ${
                   isCurrent
                     ? 'bg-primary-light text-primary font-semibold scale-[1.02]'

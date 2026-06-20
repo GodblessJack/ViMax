@@ -34,6 +34,7 @@ export type SessionDetail = SessionSummary & {
   user_requirement: string
   artifact_checklist: Record<string, boolean>
   working_dir: string
+  shot_count: number
 }
 
 // ── Wizard Step Types ──────────────────────────────────────────────
