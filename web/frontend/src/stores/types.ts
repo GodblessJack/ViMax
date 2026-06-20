@@ -144,6 +144,15 @@ export type WsServerEvent =
   | { type: 'pipeline:status'; stage: string; message: string }
   | { type: 'pipeline:complete'; stage: string; final_video_url?: string }
   | { type: 'connected'; session_id: string; current_step: string; session_stage: string }
+  // New WS event types (V2 architecture alignment)
+  | { type: 'agent:workflow_started'; session_id: string; session_stage?: string; message?: string }
+  | { type: 'agent:reply'; session_id?: string; reply: string }
+  | { type: 'agent:regenerate_ack'; session_id?: string; step?: string }
+  | { type: 'agent:confirm_ack'; session_id?: string; step?: string }
+  | { type: 'agent:navigate'; session_id?: string; step_index: number; target_step?: string }
+  | { type: 'event:ack'; event_type: string; session_id: string }
+  | { type: 'event:error'; event_type: string; session_id: string; error: string }
+  | { type: 'pong' }
   // Legacy event types (for backward compatibility during migration)
   | { type: 'pipeline_status'; stage?: string; phase?: string; message?: string; metadata?: Record<string, unknown> }
   | { type: 'artifact_ready'; path?: string; url?: string }
