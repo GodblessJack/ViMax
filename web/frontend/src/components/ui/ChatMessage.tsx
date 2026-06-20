@@ -36,7 +36,7 @@ function renderText(text: string | null | undefined) {
   }
 
   if (segments.length === 0) {
-    segments.push({ type: 'text', content: text })
+    segments.push({ type: 'text', content: safe })
   }
 
   return segments.map((seg, i) => {
