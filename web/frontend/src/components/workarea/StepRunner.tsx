@@ -95,16 +95,12 @@ export function StepRunner({ step }: { step: WorkflowStep }) {
           {(() => {
             const Panel = STEP_RESULT_COMPONENTS[step.name]
             const artifactData = runtime.result?.previewData
-            if (Panel && artifactData) {
+            if (Panel !== undefined && artifactData !== undefined && artifactData !== null) {
               return (
                 <Suspense fallback={<div className="p-4 text-muted-foreground text-sm">加载结果面板...</div>}>
-                  <Panel
-                    data={artifactData}
-                    onEdit={(path, value) => {
-                      const store = useWorkflowStore.getState()
-                      store.patchArtifact(step.name, { [path]: value })
-                    }}
-                  />
+                  {/* TODO: When editing is implemented, panels should write to local state
+                      that syncs both to store.artifacts AND server via WS */}
+                  <Panel data={artifactData} />
                 </Suspense>
               )
             }
