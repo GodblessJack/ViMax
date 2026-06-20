@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import AppShell from './components/layout/AppShell'
 import DashboardPage from './pages/DashboardPage'
 import CreateDramaPage from './pages/CreateDramaPage'
@@ -13,6 +13,7 @@ export default function App() {
         <Route path="/create" element={<CreateDramaPage />} />
         <Route path="/works" element={<MyWorksPage />} />
         <Route path="/works/:sessionId" element={<WorkDetailPage />} />
+        <Route path="/my-works" element={<Navigate to="/works" replace />} />
       </Routes>
     </AppShell>
   )
