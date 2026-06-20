@@ -218,6 +218,65 @@ class AgentService:
             "reply": reply_text,
         })
 
+    async def handle_regenerate(
+        self,
+        session_id: str,
+        step: str,
+        feedback: str | None = None,
+    ) -> None:
+        """Handle a user request to regenerate a step.
+
+        Resets the step runtime state and re-executes it via tool_run_step.
+        Broadcasts agent:regenerate_ack and step:preparing before execution,
+        then step:completed or step:error on result.
+        """
+        from web.backend.services.agent_tools import tool_run_step
+
+        # Acknowledge the regenerate request
+        await self.broadcast(session_id, {
+            "type": "agent:regenerate_ack",
+            "session_id": session_id,
+            "step": step,
+        })
+
+        # Signal that the step is being prepared for regeneration
+        await self.broadcast(session_id, {
+            "type": "step:preparing",
+            "step": step,
+            "context": {
+                "inputs": {"feedback": feedback or ""},
+                "constraints": [],
+                "agentIntent": f"Regenerating {step} based on user feedback",
+            },
+        })
+
+        try:
+            result = await tool_run_step(
+                session_id=session_id,
+                step_name=step,
+                params={"feedback": feedback or ""},
+                agent_service=self,
+            )
+
+            if result.get("status") == "error":
+                await self.broadcast(session_id, {
+                    "type": "step:error",
+                    "step": step,
+                    "error": result.get("error", "Regeneration failed"),
+                    "recoverable": True,
+                })
+        except Exception as exc:
+            logger.exception(
+                "handle_regenerate failed for session %s step %s",
+                session_id, step,
+            )
+            await self.broadcast(session_id, {
+                "type": "step:error",
+                "step": step,
+                "error": str(exc),
+                "recoverable": True,
+            })
+
     # ── Conversation management ─────────────────────────────────────────
 
     def _get_or_create_conversation(self, session_id: str) -> list[dict[str, Any]]:

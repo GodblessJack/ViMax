@@ -35,6 +35,15 @@ async def pipeline_websocket(websocket: WebSocket, session_id: str):
     await websocket.accept()
     svc = _get_pipeline_service()
     svc.register_ws(session_id, websocket)
+
+    # Also register with AgentService so step:* progress events reach this connection
+    asvc = _get_agent_service()
+    async def _ws_send(payload: dict) -> None:
+        try:
+            await websocket.send_json(payload)
+        except Exception:
+            pass
+    asvc.register_ws_callback(session_id, _ws_send)
     try:
         # Send a welcome message
         await websocket.send_json({
@@ -62,6 +71,7 @@ async def pipeline_websocket(websocket: WebSocket, session_id: str):
         logger.exception("WebSocket error for session %s", session_id)
     finally:
         svc.unregister_ws(session_id, websocket)
+        asvc.unregister_ws_callback(session_id, _ws_send)
 
 
 # -- Unified endpoint (Agent-driven bidirectional events) ---------------------
@@ -234,10 +244,9 @@ async def _handle_client_event(
                 await agent_service.handle_action(session_id, action, action_payload)
 
         elif event_type == "user:regenerate":
-            await agent_service.broadcast(session_id, {
-                "type": "agent:regenerate_ack",
-                "session_id": session_id,
-            })
+            step = payload.get("step", "")
+            feedback = payload.get("feedback", "")
+            await agent_service.handle_regenerate(session_id, step, feedback)
 
     except Exception:
         logger.exception("Failed to handle client event %s for session %s", event_type, session_id)
