@@ -83,6 +83,7 @@ export interface WorkflowState {
   // ── WebSocket / Connection ──────────────────────────────────────
   connectionState: ConnectionState
   events: PipelineEvent[]
+  _wsSendFn: ((event: any) => void) | null
 
   // ── Artifacts ───────────────────────────────────────────────────
   finalVideoUrl: string | null
@@ -154,6 +155,8 @@ export interface WorkflowActions {
   setConnectionState: (state: ConnectionState) => void
   handleWsEvent: (event: WsServerEvent) => void
   clearEvents: () => void
+  setWsSendFn: (fn: ((event: any) => void) | null) => void
+  sendWsMessage: (event: any) => void
 
   // Artifacts
   setFinalVideoUrl: (url: string | null) => void
