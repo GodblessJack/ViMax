@@ -32,6 +32,7 @@ from tools.video_generator_omni_yunwu_api import VideoGeneratorOmniYunwuAPI
 from tools.video_generator_veo_google_api import VideoGeneratorVeoGoogleAPI
 from tools.video_generator_veo_yunwu_api import VideoGeneratorVeoYunwuAPI
 
+from web.backend.config import MOCK_MODE
 from web.backend.models.api_models import (
     PipelinePlanRequest, PipelineRenderRequest, PipelineStartResponse,
 )
@@ -511,21 +512,264 @@ class PipelineService:
                 "error": "Planning was cancelled",
             })
         except asyncio.TimeoutError:
-            logger.exception("Planning timed out for session %s", session_id)
-            friendly = "规划超时 — AI 服务响应过慢，请重试或缩短创意描述"
-            self._session_index.update_stage(session_id, "error", friendly)
-            await self._broadcast_ws(session_id, {
-                "type": "pipeline_error", "session_id": session_id,
-                "error": friendly,
-            })
+            if MOCK_MODE:
+                logger.warning("Planning timed out for session %s — falling back to mock data", session_id)
+                await self._generate_mock_planning(session_id, request.idea, request.style)
+            else:
+                logger.exception("Planning timed out for session %s", session_id)
+                friendly = "规划超时 — AI 服务响应过慢，请重试或缩短创意描述"
+                self._session_index.update_stage(session_id, "error", friendly)
+                await self._broadcast_ws(session_id, {
+                    "type": "pipeline_error", "session_id": session_id,
+                    "error": friendly,
+                })
         except Exception as exc:
-            logger.exception("Planning failed for session %s", session_id)
-            friendly = f"规划失败: {_friendly_error(exc)}"
-            self._session_index.update_stage(session_id, "error", friendly)
-            await self._broadcast_ws(session_id, {
-                "type": "pipeline_error", "session_id": session_id,
-                "error": friendly,
-            })
+            if MOCK_MODE:
+                logger.warning("Planning failed for session %s — falling back to mock data: %s", session_id, exc)
+                await self._generate_mock_planning(session_id, request.idea, request.style)
+            else:
+                logger.exception("Planning failed for session %s", session_id)
+                friendly = f"规划失败: {_friendly_error(exc)}"
+                self._session_index.update_stage(session_id, "error", friendly)
+                await self._broadcast_ws(session_id, {
+                    "type": "pipeline_error", "session_id": session_id,
+                    "error": friendly,
+                })
+
+    async def _generate_mock_planning(self, session_id: str, idea: str, style: str) -> None:
+        """Generate rich mock planning data when LLM is unavailable.
+
+        Creates story, characters, script, and storyboard artifacts in the
+        session working directory and broadcasts progress events to mimic the
+        real pipeline flow.
+        """
+        import json as json_mod
+
+        working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
+        os.makedirs(working_dir, exist_ok=True)
+
+        logger.info("Generating mock planning data for session %s (idea=%r, style=%r)",
+                    session_id, idea, style)
+
+        # ── 1. Story ──────────────────────────────────────────────────
+        style_desc = style or "wuxia"
+        idea_text = idea or "一个关于江湖恩怨与侠义精神的传奇故事"
+
+        story = f"""第一章 月下孤影
+
+夜，深沉如墨。一轮冷月高悬天际，清辉洒落，将整座青云山笼罩在一片幽蓝之中。
+
+山腰处的竹林间，一个白衣少年持剑而立。他名叫{idea_text[:20]}，自幼在师父门下习武，如今已是弱冠之年。今夜，是他首次独自下山的前夕。
+
+少年手中的长剑泛着淡淡的青光，剑身上刻着「{idea_text[:10] or style_desc}」三个古字，那是师父临终前交予他的遗物。每当月华映照剑身，便会浮现出若隐若现的纹路，仿佛在诉说着一个尘封已久的秘密。
+
+「明日下山，切记：江湖险恶，人心叵测。」师父的话语犹在耳畔。
+
+少年深吸一口气，目光穿过层层竹影，望向山脚下那座灯火阑珊的城池。他知道，在那座城中，有着关于他身世的线索，也有着一段未了的恩怨。
+
+第二章 城中风波
+
+翌日清晨，少年踏入了繁华的洛水城。
+
+青石板铺就的街道两旁，商铺林立，人声鼎沸。卖艺的、杂耍的、说书的、算卦的……三教九流汇聚一处，好不热闹。少年自幼长于深山，哪见过这等景象，不禁看得有些眼花缭乱。
+
+正行间，忽听得前方传来一阵打斗之声。
+
+少年快步上前，只见六七名黑衣壮汉正围着一个绿衫女子疯狂进击。那女子虽武艺不弱，但寡不敌众，已是左支右绌，眼看就要受伤。
+
+少年心中一凛，右手已按在了剑柄之上。
+
+「住手！」他一声断喝，人随声至，一道青芒闪过，已将两名黑衣人的兵器齐齐削断。
+
+那绿衫女子趁机一个翻身，退到少年身侧，低声说道：「多谢相救。这些人是铁剑门的人，你……你不该管这闲事的。」
+
+少年微微一笑：「路见不平，拔刀相助，本是习武之人该做的事。」
+
+第三章 宿命之约
+
+黑衣人被少年一招镇住，为首之人冷声道：「小子，我劝你不要多管闲事，否则……」他话未说完，突然脸色大变，目光死死盯着少年手中那柄泛着青光的长剑。
+
+「……青冥剑！」黑衣人的声音带着颤抖，「你……你是那个人的徒弟？」
+
+少年眉头一皱：「你知道我师父？」
+
+黑衣人后退两步，从怀中掏出一支信号箭，朝天射去。只听一声尖啸，一道红光在半空中炸开。
+
+绿衫女子脸色大变：「不好，他们在叫援兵！我们快走！」
+
+两人足尖一点，跃上房顶，几个起落便消失在街巷深处。
+
+在绿衫女子的带领下，少年穿过了无数条狭窄的巷道，最终来到了一处僻静的院落。院中有一株百年老槐树，枝繁叶茂，遮天蔽日。
+
+「你先在这里避一避。」绿衫女子喘息着说道，「我叫柳如烟，多谢恩公适才出手。敢问恩公高姓大名？」
+
+少年正欲回答，却听得院门外传来一阵沉稳的脚步声。
+
+一个白发苍苍的老者缓步走了进来，目光落在少年手中的青冥剑上，眼中闪过一丝复杂的光芒。
+
+「二十年了……青冥剑终于重现江湖。」老者长叹一声，「孩子，你的师父……他还好吗？」
+
+少年心中巨震，脱口道：「师父已经仙逝了。您……您认识他？」
+
+老者的眼中掠过一抹深沉的悲恸，缓缓说道：「岂止认识。这柄青冥剑，原本是两个人的佩剑。一柄在你师父手中，另一柄……」他顿了顿，从怀中取出一柄形状一模一样的剑，只是颜色暗沉，如同深渊。
+
+「在我这里。」
+
+这一刻，月光透过槐树的枝叶洒落，两柄剑在清辉中互相辉映，仿佛在述说着一段横跨二十年的江湖往事。
+
+（全文完）"""
+
+        story_path = os.path.join(working_dir, "story.txt")
+        with open(story_path, "w", encoding="utf-8") as f:
+            f.write(story)
+
+        await self._broadcast_ws(session_id, {
+            "type": "artifact_ready", "session_id": session_id,
+            "path": "idea2video/story.txt",
+            "url": f"/api/files/{session_id}/idea2video/story.txt",
+        })
+
+        # ── 2. Characters ──────────────────────────────────────────────
+        characters = [
+            {
+                "name": "林风",
+                "identifier_in_scene": "林风",
+                "description": "白衣少年侠客，手持师父遗留的青冥剑，武功高强但初涉江湖，性格正直热血，其身世与二十年前一桩江湖旧案有着千丝万缕的联系。",
+                "appearance": "约二十岁，身着白色长袍，长发束冠，面容清俊，眼神中透着坚毅与些许迷茫",
+                "personality": "正义感强烈，心地纯善但不失机敏，面对强敌时冷静沉着",
+            },
+            {
+                "name": "柳如烟",
+                "identifier_in_scene": "柳如烟",
+                "description": "绿衫女子，出身医药世家，精通医术与毒术，被铁剑门追杀，与主角林风命运交织。",
+                "appearance": "约十八九岁，身着翠绿色纱裙，容貌秀丽，柳眉皓齿，手持银针为武器",
+                "personality": "外冷内热，警惕性高，因家族变故而对人充满戒备，但内心善良",
+            },
+            {
+                "name": "铁无痕",
+                "identifier_in_scene": "铁无痕",
+                "description": "铁剑门掌门，武功盖世，为夺取青冥剑不择手段，是二十年前那场恩怨的核心人物。",
+                "appearance": "约五十余岁，身材魁梧，面目威严，双手布满老茧，一双鹰目令人不寒而栗",
+                "personality": "野心勃勃，城府极深，为达目的不惜一切手段",
+            },
+            {
+                "name": "白云道长",
+                "identifier_in_scene": "白云道长",
+                "description": "得道高人，隐居深山三十载，看似不问世事，实则与青冥剑的来历有着密切关系。",
+                "appearance": "约七十余岁，白发白须，仙风道骨，手持拂尘，身着灰色道袍",
+                "personality": "看透世事，言语玄奥，关键时刻指点迷津",
+            },
+        ]
+
+        chars_path = os.path.join(working_dir, "characters.json")
+        with open(chars_path, "w", encoding="utf-8") as f:
+            json_mod.dump(characters, f, ensure_ascii=False, indent=2)
+
+        await self._broadcast_ws(session_id, {
+            "type": "artifact_ready", "session_id": session_id,
+            "path": "idea2video/characters.json",
+            "url": f"/api/files/{session_id}/idea2video/characters.json",
+        })
+
+        # ── 3. Script ──────────────────────────────────────────────────
+        script = [
+            {
+                "scene_number": 0,
+                "title": "月下初遇",
+                "description": f"月夜竹林，主角林风持{style_desc}风格的青冥剑静立，回忆师父遗训，准备下山。",
+                "shots": 4,
+                "location": "青云山竹林",
+                "time_of_day": "深夜",
+                "mood": "静谧、神秘、期待",
+                "characters": ["林风"],
+            },
+            {
+                "scene_number": 1,
+                "title": "城中风波",
+                "description": "林风初入洛水城，目睹柳如烟被黑衣人围攻，拔剑相助，青冥剑首次显露。",
+                "shots": 5,
+                "location": "洛水城街道",
+                "time_of_day": "正午",
+                "mood": "热闹、紧张、激烈",
+                "characters": ["林风", "柳如烟", "铁无痕手下"],
+            },
+            {
+                "scene_number": 2,
+                "title": "宿命之约",
+                "description": "在隐秘院落中，白云道长揭示青冥剑的秘密，二十年前的恩怨浮出水面。",
+                "shots": 4,
+                "location": "隐秘院落",
+                "time_of_day": "黄昏",
+                "mood": "沉重、揭示、宿命",
+                "characters": ["林风", "柳如烟", "白云道长"],
+            },
+        ]
+
+        script_path = os.path.join(working_dir, "script.json")
+        with open(script_path, "w", encoding="utf-8") as f:
+            json_mod.dump(script, f, ensure_ascii=False, indent=2)
+
+        await self._broadcast_ws(session_id, {
+            "type": "artifact_ready", "session_id": session_id,
+            "path": "idea2video/script.json",
+            "url": f"/api/files/{session_id}/idea2video/script.json",
+        })
+
+        # ── 4. Storyboard for scene_0 ──────────────────────────────────
+        scene_dir = os.path.join(working_dir, "scene_0")
+        os.makedirs(scene_dir, exist_ok=True)
+
+        storyboard = [
+            {
+                "shot_number": 1,
+                "visual_description": "夜空之下，一轮冷月高悬。镜头从月亮缓缓下移，穿过夜雾，落在青云山竹林间。白色身影持剑静立，衣袂在夜风中轻轻飘动。",
+                "camera_angle": "远景，自上而下摇镜",
+                "duration": 6.0,
+                "action": "环境建立，引入主角",
+            },
+            {
+                "shot_number": 2,
+                "visual_description": "镜头缓缓推近主角面部。月光照亮他清俊的脸庞，眼神中混合着坚毅与迷惘。他低头看着手中的青冥剑，剑身在月华下泛起淡淡的幽光。",
+                "camera_angle": "中景转特写，缓慢推镜",
+                "duration": 5.0,
+                "action": "展现主角内心情感",
+            },
+            {
+                "shot_number": 3,
+                "visual_description": "一个柔和的叠化转场。少年脑中浮现师父临终时的画面——苍老的手将青冥剑交到他手中。幻象与现实的叠加表现回忆。",
+                "camera_angle": "特写+叠化特效",
+                "duration": 4.0,
+                "action": "回忆闪回",
+            },
+            {
+                "shot_number": 4,
+                "visual_description": "回到现实。少年深吸一口气，目光穿过层层竹影，望向山脚下灯火阑珊的城池。镜头跟随他的视线拉远，展现远处城池的全景。",
+                "camera_angle": "远景，主观视角转全景",
+                "duration": 5.0,
+                "action": "主角下定决心，引出下一场景",
+            },
+        ]
+
+        sb_path = os.path.join(scene_dir, "storyboard.json")
+        with open(sb_path, "w", encoding="utf-8") as f:
+            json_mod.dump(storyboard, f, ensure_ascii=False, indent=2)
+
+        await self._broadcast_ws(session_id, {
+            "type": "artifact_ready", "session_id": session_id,
+            "path": "idea2video/scene_0/storyboard.json",
+            "url": f"/api/files/{session_id}/idea2video/scene_0/storyboard.json",
+        })
+
+        # ── Mark planning complete ─────────────────────────────────────
+        self._session_index.update_stage(session_id, "narrative_planned", "Planning complete (mock)")
+
+        await self._broadcast_ws(session_id, {
+            "type": "pipeline_complete", "session_id": session_id,
+            "stage": "narrative_planned",
+            "message": "Planning complete. Ready for rendering.",
+        })
+
+        logger.info("Mock planning data generated successfully for session %s", session_id)
 
     # ── Public API: start rendering ───────────────────────────────────
 

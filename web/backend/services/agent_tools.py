@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -95,6 +96,31 @@ async def tool_read_artifact(
         return artifact_file.read_text(encoding="utf-8")
     except (KeyError, ValueError, OSError) as exc:
         return f"Error reading artifact: {exc}"
+
+
+def _read_story_preview(session_id: str, svc: Any) -> dict[str, Any] | None:
+    """Read story.txt and return a preview snippet for the step:completed event."""
+    try:
+        wd = svc._index.working_dir(session_id)
+        story_path = wd / "idea2video" / "story.txt"
+        if not story_path.exists():
+            return None
+        text = story_path.read_text(encoding="utf-8")
+        # Take first 200 chars as preview, find a natural break point
+        preview = text[:200]
+        # Try to break at a newline or sentence boundary
+        for sep in ["\n\n", "\n", "。", "；"]:
+            idx = preview.rfind(sep)
+            if idx > 50:
+                preview = preview[:idx + len(sep)]
+                break
+        return {
+            "storyPreview": preview.strip(),
+            "totalChars": len(text),
+            "paragraphCount": text.count("\n\n") + 1,
+        }
+    except Exception:
+        return None
 
 
 # ── Tool: run_step ──────────────────────────────────────────────────────
@@ -194,28 +220,158 @@ async def tool_run_step(
                     "result": {
                         "summary": "故事构思完成",
                         "artifactPaths": ["idea2video/story.txt"],
-                        "previewData": None,
+                        "previewData": _read_story_preview(session_id, svc),
                         "editableFields": [],
                     },
                 })
             else:
                 # Non-trigger planning steps — already completed by _run_planning
+                # Read the generated artifacts and broadcast enriched step:completed events
+                svc = get_session_service()
+                wd = svc._index.working_dir(session_id)
+                i2v_dir = wd / "idea2video"
+
                 await agent_service.broadcast(session_id, {
                     "type": "step:running",
                     "step": step_name,
                     "progress_percent": 50,
                     "progress_message": f"规划阶段已完成: {step_name}",
                 })
-                await agent_service.broadcast(session_id, {
-                    "type": "step:completed",
-                    "step": step_name,
-                    "result": {
-                        "summary": f"{step_name} 完成",
-                        "artifactPaths": [],
-                        "previewData": None,
-                        "editableFields": [],
-                    },
-                })
+
+                if step_name == "character_extraction":
+                    chars_path = i2v_dir / "characters.json"
+                    if chars_path.exists():
+                        try:
+                            chars_data = json.loads(chars_path.read_text(encoding="utf-8"))
+                            names = [c.get("name", "?") for c in chars_data] if isinstance(chars_data, list) else []
+                            await agent_service.broadcast(session_id, {
+                                "type": "step:completed",
+                                "step": step_name,
+                                "result": {
+                                    "summary": f"已提取 {len(names)} 个角色: {', '.join(names)}",
+                                    "artifactPaths": ["idea2video/characters.json"],
+                                    "previewData": {"characterNames": names, "count": len(names)},
+                                    "editableFields": [],
+                                },
+                            })
+                        except Exception as read_err:
+                            logger.warning("Failed to read characters.json for step %s: %s", step_name, read_err)
+                            await agent_service.broadcast(session_id, {
+                                "type": "step:completed",
+                                "step": step_name,
+                                "result": {
+                                    "summary": f"{step_name} 完成（文件读取失败）",
+                                    "artifactPaths": ["idea2video/characters.json"],
+                                    "previewData": None,
+                                    "editableFields": [],
+                                },
+                            })
+                    else:
+                        await agent_service.broadcast(session_id, {
+                            "type": "step:completed",
+                            "step": step_name,
+                            "result": {
+                                "summary": f"{step_name} 完成",
+                                "artifactPaths": ["idea2video/characters.json"],
+                                "previewData": None,
+                                "editableFields": [],
+                            },
+                        })
+                elif step_name == "script_writing":
+                    script_path = i2v_dir / "script.json"
+                    if script_path.exists():
+                        try:
+                            script_data = json.loads(script_path.read_text(encoding="utf-8"))
+                            titles = [s.get("title", f"Scene {s.get('scene_number', '?')}") for s in script_data] if isinstance(script_data, list) else []
+                            await agent_service.broadcast(session_id, {
+                                "type": "step:completed",
+                                "step": step_name,
+                                "result": {
+                                    "summary": f"已编写 {len(titles)} 个场景: {', '.join(titles)}",
+                                    "artifactPaths": ["idea2video/script.json"],
+                                    "previewData": {"sceneTitles": titles, "sceneCount": len(titles)},
+                                    "editableFields": [],
+                                },
+                            })
+                        except Exception as read_err:
+                            logger.warning("Failed to read script.json for step %s: %s", step_name, read_err)
+                            await agent_service.broadcast(session_id, {
+                                "type": "step:completed",
+                                "step": step_name,
+                                "result": {
+                                    "summary": f"{step_name} 完成（文件读取失败）",
+                                    "artifactPaths": ["idea2video/script.json"],
+                                    "previewData": None,
+                                    "editableFields": [],
+                                },
+                            })
+                    else:
+                        await agent_service.broadcast(session_id, {
+                            "type": "step:completed",
+                            "step": step_name,
+                            "result": {
+                                "summary": f"{step_name} 完成",
+                                "artifactPaths": ["idea2video/script.json"],
+                                "previewData": None,
+                                "editableFields": [],
+                            },
+                        })
+                elif step_name == "storyboard_design":
+                    sb_path = i2v_dir / "scene_0" / "storyboard.json"
+                    if sb_path.exists():
+                        try:
+                            sb_data = json.loads(sb_path.read_text(encoding="utf-8"))
+                            shot_count = len(sb_data) if isinstance(sb_data, list) else 0
+                            shot_descs = []
+                            if isinstance(sb_data, list):
+                                for s in sb_data:
+                                    desc = s.get("visual_description", "")[:60]
+                                    if desc:
+                                        shot_descs.append(desc + "…")
+                            await agent_service.broadcast(session_id, {
+                                "type": "step:completed",
+                                "step": step_name,
+                                "result": {
+                                    "summary": f"已设计 {shot_count} 个镜头 (scene_0)",
+                                    "artifactPaths": ["idea2video/scene_0/storyboard.json"],
+                                    "previewData": {"shotCount": shot_count, "shotDescriptions": shot_descs},
+                                    "editableFields": [],
+                                },
+                            })
+                        except Exception as read_err:
+                            logger.warning("Failed to read storyboard.json for step %s: %s", step_name, read_err)
+                            await agent_service.broadcast(session_id, {
+                                "type": "step:completed",
+                                "step": step_name,
+                                "result": {
+                                    "summary": f"{step_name} 完成（文件读取失败）",
+                                    "artifactPaths": ["idea2video/scene_0/storyboard.json"],
+                                    "previewData": None,
+                                    "editableFields": [],
+                                },
+                            })
+                    else:
+                        await agent_service.broadcast(session_id, {
+                            "type": "step:completed",
+                            "step": step_name,
+                            "result": {
+                                "summary": f"{step_name} 完成",
+                                "artifactPaths": ["idea2video/scene_0/storyboard.json"],
+                                "previewData": None,
+                                "editableFields": [],
+                            },
+                        })
+                else:
+                    await agent_service.broadcast(session_id, {
+                        "type": "step:completed",
+                        "step": step_name,
+                        "result": {
+                            "summary": f"{step_name} 完成",
+                            "artifactPaths": [],
+                            "previewData": None,
+                            "editableFields": [],
+                        },
+                    })
 
         elif phase == "rendering":
             if step_name == "character_portraits":

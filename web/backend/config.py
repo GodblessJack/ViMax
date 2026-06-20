@@ -1,5 +1,6 @@
 """Backend configuration via environment variables with sensible defaults."""
 
+import os
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
@@ -21,3 +22,5 @@ class BackendConfig(BaseSettings):
 
 
 backend_config = BackendConfig()
+
+MOCK_MODE = os.environ.get("VIMAX_MOCK", "0") == "1"
