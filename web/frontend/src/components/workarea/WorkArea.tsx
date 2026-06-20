@@ -3,6 +3,7 @@ import { useWorkflowStore } from '@/stores/workflowStore'
 import { StepNavigationBar } from './StepNavigationBar'
 import { StepRunner } from './StepRunner'
 import { StepActions } from './StepActions'
+import { CreativeSettings } from './CreativeSettings'
 
 class PanelErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean }> {
   state = { hasError: false }
@@ -22,11 +23,7 @@ export function WorkArea() {
   const currentStep = steps[currentStepIndex]
 
   if (!sessionId) {
-    return (
-      <div className="flex items-center justify-center h-full text-muted-foreground">
-        创建会话后开始创作流程
-      </div>
-    )
+    return <CreativeSettings />
   }
 
   return (
