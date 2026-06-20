@@ -67,6 +67,13 @@ export function useSessionWebSocket(sessionId: string | null) {
         store.setConnectionState('connected')
         logger.ws('rx', 'connected', { sessionId: sid })
 
+        // Wire WS send function into store so any component can send messages
+        store.setWsSendFn((event: WsClientEvent) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(event))
+          }
+        })
+
         // Start ping interval
         if (pingTimerRef.current) clearInterval(pingTimerRef.current)
         pingTimerRef.current = setInterval(() => {
@@ -78,6 +85,7 @@ export function useSessionWebSocket(sessionId: string | null) {
 
       ws.onclose = () => {
         if (!mountedRef.current) return
+        store.setWsSendFn(null)
         store.setConnectionState('disconnected')
         if (pingTimerRef.current) {
           clearInterval(pingTimerRef.current)

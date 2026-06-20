@@ -371,6 +371,14 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
 
   clearEvents: () => set({ events: [] }),
 
+  // WS send bridge — populated by useSessionWebSocket
+  _wsSendFn: null as ((event: any) => void) | null,
+  setWsSendFn: (fn: ((event: any) => void) | null) => set({ _wsSendFn: fn }),
+  sendWsMessage: (event: any) => {
+    const fn = get()._wsSendFn
+    if (fn) fn(event)
+  },
+
   handleWsEvent: (event: WsServerEvent) => {
     const state = get()
     const MAX_EVENTS = 500

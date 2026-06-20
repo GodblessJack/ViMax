@@ -1,13 +1,10 @@
-import { useState, useEffect } from 'react'
-import { RefreshCw, ChevronRight, Edit3, Loader2, CheckCircle2 } from 'lucide-react'
+import { useState } from 'react'
+import { RefreshCw, ChevronRight, Edit3, CheckCircle2 } from 'lucide-react'
+import { StepRunnerPanel } from '@/components/StepRunner/StepRunnerCard'
+import { useWorkflowStore } from '@/stores/workflowStore'
+import type { WorkflowStepName } from '@/stores/types'
 
-const PLANNING_STAGES = [
-  { label: '分析创意需求...', icon: '🔍' },
-  { label: '构思故事脉络...', icon: '📖' },
-  { label: '设计角色形象...', icon: '👥' },
-  { label: '编排分集结构...', icon: '📺' },
-  { label: '生成分镜脚本...', icon: '🎬' },
-]
+const PLAN_STEPS: WorkflowStepName[] = ['story_generation', 'character_extraction', 'script_writing']
 
 type Step2Props = {
   story: string
@@ -26,11 +23,13 @@ export default function Step2PlanningReview({
   onRegenerate, onConfirm, onCancel,
 }: Step2Props) {
   const [editingStory, setEditingStory] = useState(false)
+  const pendingConfirm = useWorkflowStore(s => s.pendingConfirmation)
+  const sendEvent = useWorkflowStore(s => s.sendWsMessage)
 
   return (
     <div className="page-enter">
       <h2 className="text-xl font-bold mb-1">AI 规划审阅</h2>
-      <p className="text-sm text-muted-foreground mb-6">检查 AI 生成的故事、角色和分集结构</p>
+      <p className="text-sm text-muted-foreground mb-6">逐步生成：故事 → 角色 → 剧本，每步可确认修改</p>
 
       {error && (
         <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -47,7 +46,45 @@ export default function Step2PlanningReview({
       )}
 
       {loading ? (
-        <PlanningLoading onCancel={onCancel} />
+        <div className="space-y-4">
+          {/* Real step progress from WorkflowStore */}
+          <StepRunnerPanel filterSteps={PLAN_STEPS} />
+
+          {/* Confirmation prompt when a step needs user input */}
+          {pendingConfirm && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm">
+              <p className="font-medium text-blue-800 mb-2">{pendingConfirm.message}</p>
+              <div className="flex gap-2 flex-wrap">
+                {pendingConfirm.suggestions.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      sendEvent?.({
+                        type: 'user:confirm',
+                        step: pendingConfirm.stepName,
+                        payload: {},
+                      } as any)
+                    }}
+                    className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {onCancel && (
+            <div className="text-center mt-4">
+              <button
+                onClick={onCancel}
+                className="text-sm text-muted-foreground hover:text-destructive transition-colors underline underline-offset-4"
+              >
+                取消规划
+              </button>
+            </div>
+          )}
+        </div>
       ) : (
         <>
           {/* Story */}
@@ -147,78 +184,6 @@ export default function Step2PlanningReview({
             </button>
           </div>
         </>
-      )}
-    </div>
-  )
-}
-
-// ── Loading animation with stage cycling ──────────────────────────
-
-function PlanningLoading({ onCancel }: { onCancel?: () => void }) {
-  const [stageIndex, setStageIndex] = useState(0)
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setStageIndex(prev => (prev + 1) % PLANNING_STAGES.length)
-    }, 2500)
-    return () => clearInterval(timer)
-  }, [])
-
-  return (
-    <div className="space-y-4">
-      {/* Progress indicator */}
-      <div className="rounded-xl border bg-card p-6 text-center">
-        <div className="flex items-center justify-center gap-3 mb-4">
-          <Loader2 className="h-6 w-6 text-primary animate-spin" />
-          <span className="text-lg font-semibold">AI 正在为你创作...</span>
-        </div>
-
-        {/* Stage list */}
-        <div className="space-y-2 max-w-sm mx-auto">
-          {PLANNING_STAGES.map((stage, i) => {
-            const isCurrent = i === stageIndex
-            const isPast = i < stageIndex
-            return (
-              <div
-                key={`plan-stage-${i}`}
-                className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm transition-all duration-500 ${
-                  isCurrent
-                    ? 'bg-primary-light text-primary font-semibold scale-[1.02]'
-                    : isPast
-                      ? 'text-muted-foreground/60'
-                      : 'text-muted-foreground/30'
-                }`}
-              >
-                <span className="text-lg">{stage.icon}</span>
-                <span className="flex-1 text-left">{stage.label}</span>
-                {isPast && <CheckCircle2 className="h-4 w-4 text-success" />}
-                {isCurrent && <Loader2 className="h-4 w-4 text-primary animate-spin" />}
-              </div>
-            )
-          })}
-        </div>
-
-        <p className="text-xs text-muted-foreground mt-4">
-          这通常需要 30 秒到 2 分钟，取决于创意复杂度
-        </p>
-      </div>
-
-      {/* Skeleton placeholders */}
-      <div className="rounded-xl border p-5 animate-pulse">
-        <div className="skeleton h-5 w-20 mb-3 rounded-md" />
-        <div className="skeleton h-4 w-full mb-1.5 rounded-md" />
-        <div className="skeleton h-4 w-2/3 rounded-md" />
-      </div>
-
-      {onCancel && (
-        <div className="text-center mt-4">
-          <button
-            onClick={onCancel}
-            className="text-sm text-muted-foreground hover:text-destructive transition-colors underline underline-offset-4"
-          >
-            取消规划
-          </button>
-        </div>
       )}
     </div>
   )
