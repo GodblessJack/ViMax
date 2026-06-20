@@ -6,10 +6,12 @@ type ChatMessageProps = {
 }
 
 /** Simple markdown-like renderer: **bold**, newlines → <br/>, `code` */
-function renderText(text: string) {
+function renderText(text: string | null | undefined) {
+  // Defensive: treat null/undefined as empty string
+  const safe = text ?? ''
   // Split into segments: bold, inline code, plain text
   const segments: { type: 'text' | 'bold' | 'code'; content: string }[] = []
-  let remaining = text
+  let remaining = safe
   let lastIndex = 0
 
   // Match **bold** or `code`

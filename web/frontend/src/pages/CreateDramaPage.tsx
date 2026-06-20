@@ -4,6 +4,7 @@ import { WorkArea } from '@/components/workarea/WorkArea'
 import AIChatPanel from '@/components/layout/AIChatPanel'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useSessionWebSocket } from '@/hooks/useSessionWebSocket'
+import { getSession } from '@/lib/api'
 import { logger } from '@/lib/logger'
 
 export default function CreateDramaPage() {
@@ -19,32 +20,23 @@ export default function CreateDramaPage() {
   useEffect(() => {
     const sid = searchParams.get('session')
     if (!sid || sessionId) return
-    import('@/lib/api').then(({ getSession }) => {
-      getSession(sid).then((detail) => {
-        if (!detail) return
-        setSession(detail.session_id, detail.stage)
-        // Map session stage to step index (0-based)
-        const stageToStep: Record<string, number> = {
-          created: 0,
-          narrative_planning: 0,
-          narrative_planned: 2,
-          rendering: 4,
-          rendered: 5,
-          error: 0,
-          cancelled: 0,
-        }
-        goToStep(stageToStep[detail.stage] ?? 0)
-        logger.info('Session restored', { sessionId: sid, stage: detail.stage })
-        // Send resume message to Agent so it can pick up where it left off
-        const sendWsMessage = useWorkflowStore.getState().sendWsMessage
-        sendWsMessage({
-          type: 'user:message',
-          text: '/resume',
-          context: { current_step: detail.stage },
-        })
-      }).catch((err) => {
-        logger.error('Failed to restore session', err)
+    getSession(sid).then((detail) => {
+      if (!detail) return
+      setSession(detail.session_id, detail.stage)
+      const stageToStep: Record<string, number> = {
+        created: 0, narrative_planning: 0, narrative_planned: 2,
+        rendering: 4, rendered: 5, error: 0, cancelled: 0,
+      }
+      goToStep(stageToStep[detail.stage] ?? 0)
+      logger.info('Session restored', { sessionId: sid, stage: detail.stage })
+      // Send resume message to Agent
+      useWorkflowStore.getState().sendWsMessage({
+        type: 'user:message',
+        text: '/resume',
+        context: { current_step: detail.stage },
       })
+    }).catch((err) => {
+      logger.error('Failed to restore session', err)
     })
   }, [searchParams, sessionId, setSession, goToStep])
 
