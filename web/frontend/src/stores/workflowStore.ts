@@ -531,7 +531,13 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
         break
       }
       case 'agent:workflow_started': {
-        get().setSessionId((event as any).session_id)
+        get().setSession(
+          (event as any).session_id || get().sessionId || '',
+          ((event as any).session_stage as SessionStage) || 'created'
+        )
+        if ((event as any).current_step) {
+          get().setActiveStepName((event as any).current_step as WorkflowStepName)
+        }
         break
       }
       case 'pipeline:complete': {
@@ -544,6 +550,49 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
         if (event.current_step) {
           get().setActiveStepName(event.current_step as WorkflowStepName)
         }
+        break
+      }
+      case 'agent:reply': {
+        get().addChatMessage('agent', (event as any).reply || '')
+        break
+      }
+      case 'agent:regenerate_ack': {
+        const step = (event as any).step
+        if (step) {
+          get().initRuntime(step)
+          get().setRuntimePhase(step, 'preparing')
+          get().setStepStatus(step as WorkflowStepName, 'idle')
+        }
+        break
+      }
+      case 'agent:confirm_ack': {
+        const stepName = (event as any).step
+        if (stepName) {
+          const stepIdx = get().steps.find((s) => s.name === stepName)?.index
+          if (stepIdx !== undefined) get().confirmStep(stepIdx)
+        }
+        break
+      }
+      case 'agent:navigate': {
+        const idx = (event as any).step_index
+        if (typeof idx === 'number') get().goToStep(idx)
+        break
+      }
+      case 'event:ack': {
+        // no-op — confirmation receipt
+        break
+      }
+      case 'event:error': {
+        get().addError({
+          step: (event as any).event_type || 'ws',
+          message: (event as any).error || 'Unknown error',
+          timestamp: Date.now(),
+          recoverable: false,
+        })
+        break
+      }
+      case 'pong': {
+        // no-op — heartbeat response
         break
       }
       // Legacy events — log and pass through
