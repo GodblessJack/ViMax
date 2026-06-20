@@ -114,6 +114,8 @@ export interface WorkflowActions {
 
   // Session
   setSessionId: (id: string | null) => void
+  setSession: (id: string, stage: SessionStage) => void
+  clearSession: () => void
   setLoading: (loading: boolean) => void
   setPlanError: (error: string) => void
 
@@ -133,6 +135,12 @@ export interface WorkflowActions {
   // Workflow steps
   setStepStatus: (stepName: WorkflowStepName, status: StepStatus) => void
   setActiveStepName: (stepName: WorkflowStepName | null) => void
+  goToStep: (index: number) => void
+  nextStep: () => void
+  prevStep: () => void
+  confirmStep: (index: number) => void
+  requestRegenerate: (index: number, feedback?: string) => void
+  requestModify: (index: number, changes: Record<string, unknown>) => void
 
   // Step Runtime
   initRuntime: (stepName: string) => void
@@ -161,9 +169,13 @@ export interface WorkflowActions {
   addAgentSuggestion: (suggestion: AgentSuggestion) => void
   dismissSuggestion: (suggestionId: string) => void
   clearAgentSuggestions: () => void
+  addError: (error: PipelineError) => void
+  clearError: (step: string) => void
+  clearAllErrors: () => void
 
   // Artifact Cache
   updateArtifact: (key: string, content: unknown) => void
+  patchArtifact: (key: string, patch: Partial<unknown>) => void
 
   // Convenience aliases (WS event wiring)
   updateStepRuntime: (stepName: string, patch: Partial<StepRuntime>) => void
@@ -254,6 +266,14 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
 
   // ── Session ────────────────────────────────────────────────────
   setSessionId: (id) => set({ sessionId: id }),
+  setSession: (id, stage) => set({ sessionId: id, sessionStage: stage }),
+  clearSession: () => set({
+    sessionId: null,
+    sessionStage: null,
+    activeStepName: null,
+    currentStepIndex: 0,
+    confirmedSteps: new Set(),
+  }),
   setLoading: (loading) => set({ loading }),
   setPlanError: (error) => set({ planError: error }),
 
@@ -278,6 +298,50 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
       ),
     })),
   setActiveStepName: (stepName) => set({ activeStepName: stepName }),
+  goToStep: (index) => {
+    const steps = get().steps
+    if (index < 0 || index >= steps.length) return
+    const step = steps[index]
+    set({
+      currentStepIndex: index,
+      activeStepName: step.name,
+    })
+  },
+  nextStep: () => {
+    const idx = get().currentStepIndex
+    get().goToStep(idx + 1)
+  },
+  prevStep: () => {
+    const idx = get().currentStepIndex
+    get().goToStep(idx - 1)
+  },
+  confirmStep: (index) =>
+    set((state) => {
+      const next = new Set(state.confirmedSteps)
+      next.add(index)
+      return {
+        confirmedSteps: next,
+        pendingConfirmations: [],
+      }
+    }),
+  requestRegenerate: (index, feedback) => {
+    const step = get().steps[index]
+    if (!step) return
+    get().sendWsMessage({
+      type: 'user:regenerate',
+      step: step.name,
+      feedback,
+    })
+  },
+  requestModify: (index, changes) => {
+    const step = get().steps[index]
+    if (!step) return
+    get().sendWsMessage({
+      type: 'user:modify',
+      step: step.name,
+      changes,
+    })
+  },
 
   // ── Step Runtime ───────────────────────────────────────────────
   initRuntime: (stepName) =>
@@ -530,11 +594,30 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
     })),
 
   clearAgentSuggestions: () => set({ agentSuggestions: [] }),
+  addError: (error) =>
+    set((state) => ({
+      errors: [...state.errors, error],
+    })),
+  clearError: (step) =>
+    set((state) => ({
+      errors: state.errors.filter((e) => e.step !== step),
+    })),
+  clearAllErrors: () => set({ errors: [] }),
 
   // ── Artifact Cache ─────────────────────────────────────────────
   updateArtifact: (key, content) =>
     set((state) => ({
       artifacts: { ...state.artifacts, [key]: content },
+    })),
+  patchArtifact: (key, patch) =>
+    set((state) => ({
+      artifacts: {
+        ...state.artifacts,
+        [key]: {
+          ...((state.artifacts[key] as Record<string, unknown>) || {}),
+          ...(patch as Record<string, unknown>),
+        },
+      },
     })),
 
   // ── Convenience aliases ────────────────────────────────────────
