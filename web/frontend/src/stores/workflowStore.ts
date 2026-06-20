@@ -7,7 +7,7 @@
 // until the legacy page is fully migrated.
 
 import { create } from 'zustand'
-import type { WorkflowStepName, StepRuntime, StepResult, StepStatus, WizardStep, WsServerEvent, ChatMessage, AgentSuggestion, PendingConfirmation } from '@/stores/types'
+import type { WorkflowStepName, StepRuntime, StepResult, StepStatus, WizardStep, WsServerEvent, ChatMessage, AgentSuggestion, PendingConfirmation, CharacterInfo, SceneScript, StoryboardScene } from '@/stores/types'
 import { WORKFLOW_STEPS } from '@/stores/types'
 import { logger } from '@/lib/logger'
 
@@ -50,8 +50,8 @@ export interface WorkflowState {
 
   // ── Step 2: Planning Review ─────────────────────────────────────
   story: string
-  characters: any[]
-  scenes: any[]
+  characters: CharacterInfo[]
+  scenes: SceneScript[]
 
   // ── Step 3: Storyboard Review ───────────────────────────────────
   storyboardScenes: { index: number; title: string; shots: any[] }[]
@@ -107,11 +107,11 @@ export interface WorkflowActions {
 
   // Planning review
   setStory: (story: string) => void
-  setCharacters: (characters: any[]) => void
-  setScenes: (scenes: any[]) => void
+  setCharacters: (characters: CharacterInfo[]) => void
+  setScenes: (scenes: SceneScript[]) => void
 
   // Storyboard
-  setStoryboardScenes: (scenes: { index: number; title: string; shots: any[] }[]) => void
+  setStoryboardScenes: (scenes: StoryboardScene[]) => void
   setSceneIndex: (index: number) => void
   setSceneLoading: (loading: boolean) => void
 

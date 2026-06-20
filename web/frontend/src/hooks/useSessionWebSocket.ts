@@ -95,7 +95,12 @@ export function useSessionWebSocket(sessionId: string | null) {
       ws.onmessage = (e) => {
         if (!mountedRef.current) return
         try {
-          const event = JSON.parse(e.data) as WsServerEvent
+          const raw = JSON.parse(e.data)
+          if (!raw || typeof raw !== 'object' || !('type' in raw)) {
+            console.warn('[useSessionWebSocket] Invalid event shape:', raw)
+            return
+          }
+          const event = raw as WsServerEvent
           logger.ws('rx', event.type, event)
 
           // Dispatch to store for state updates

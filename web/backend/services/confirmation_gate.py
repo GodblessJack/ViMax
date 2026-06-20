@@ -99,8 +99,12 @@ class ConfirmationGate:
 
     def cancel(self, session_id: str) -> None:
         """Cancel a pending confirmation (e.g. on pipeline abort)."""
-        ev = self._events.pop(session_id, None)
+        self._results[session_id] = {
+            "action": "cancelled",
+            "payload": {},
+            "reply": "操作已取消",
+        }
+        ev = self._events.get(session_id)
         if ev is not None:
             ev.set()
-        self._results.pop(session_id, None)
         logger.debug("Cancelled confirmation gate for session %s", session_id)

@@ -85,7 +85,11 @@ async def tool_read_artifact(
         return f"Session not found: {session_id}"
     try:
         wd = svc._index.working_dir(session_id)
-        artifact_file = wd / artifact_path
+        artifact_file = (wd / artifact_path).resolve()
+        # Containment check: prevent path traversal
+        wd_resolved = wd.resolve()
+        if wd_resolved not in artifact_file.parents and artifact_file != wd_resolved:
+            return {"error": f"Path traversal blocked: {artifact_path}"}
         if not artifact_file.exists():
             return f"Artifact not found: {artifact_path}"
         return artifact_file.read_text(encoding="utf-8")
@@ -187,7 +191,14 @@ async def tool_update_artifact(
         return {"status": "error", "error": f"Session not found: {session_id}"}
     try:
         wd = svc._index.working_dir(session_id)
-        target = wd / artifact_path
+        target = (wd / artifact_path).resolve()
+        # Containment check: prevent path traversal
+        wd_resolved = wd.resolve()
+        if wd_resolved not in target.parents and target != wd_resolved:
+            return {"status": "error", "error": f"Path traversal blocked: {artifact_path}"}
+        # Content size limit: max 1MB
+        if len(content.encode("utf-8")) > 1048576:
+            return {"status": "error", "error": f"Content exceeds maximum size of 1MB: {artifact_path}"}
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return {"status": "ok", "artifact_path": artifact_path}
@@ -255,6 +266,66 @@ async def tool_navigate_to_step(
     return {"status": "ok", "step_index": step_index}
 
 
+# ── Step-aware suggestion options ────────────────────────────────────────
+
+_STEP_SUGGESTIONS: dict[str, list[dict[str, str]]] = {
+    "story_generation": [
+        {"label": "改成女性主角", "value": "把主角改成女性角色"},
+        {"label": "增加反派", "value": "增加一个重要的反派角色"},
+        {"label": "换个背景", "value": "换一个故事背景设定"},
+        {"label": "保持现状", "value": "保持现状，继续下一步"},
+    ],
+    "character_extraction": [
+        {"label": "增加角色细节", "value": "给角色增加更多细节描述"},
+        {"label": "减少角色数量", "value": "减少角色数量，聚焦主要角色"},
+        {"label": "增加配角", "value": "增加一个配角角色"},
+        {"label": "保持现状", "value": "角色设定很好，继续下一步"},
+    ],
+    "script_writing": [
+        {"label": "调整对白风格", "value": "调整对白的风格和语气"},
+        {"label": "增加场景描述", "value": "增加更多场景和动作描述"},
+        {"label": "缩短剧本", "value": "把剧本缩短一些"},
+        {"label": "保持现状", "value": "剧本没问题，继续下一步"},
+    ],
+    "storyboard_design": [
+        {"label": "调整镜头角度", "value": "调整某些镜头的拍摄角度"},
+        {"label": "增加特写镜头", "value": "增加一些特写镜头"},
+        {"label": "缩短镜头数", "value": "减少镜头总数，精简分镜"},
+        {"label": "保持现状", "value": "分镜设计很好，继续下一步"},
+    ],
+    "character_portraits": [
+        {"label": "调整角色形象", "value": "调整某个角色的外观形象"},
+        {"label": "更换风格", "value": "换一种肖像风格"},
+        {"label": "保持现状", "value": "角色形象很好，继续下一步"},
+    ],
+    "video_rendering": [
+        {"label": "调整画面风格", "value": "调整视频画面的整体风格"},
+        {"label": "添加特效", "value": "为某些场景添加特效描述"},
+        {"label": "保持现状", "value": "视频参数没问题，开始渲染"},
+    ],
+}
+
+
+def _get_suggestions_for_step(session_id: str) -> list[dict[str, str]]:
+    """Return contextual suggestion options based on current workflow step."""
+    from web.backend.main import get_session_service
+    try:
+        svc = get_session_service()
+        detail = svc.get_session(session_id)
+        if detail is None:
+            return []
+        stage = detail.stage
+        stage_to_step = {
+            "narrative_planning": "story_generation",
+            "narrative_planned": "storyboard_design",
+            "rendering": "video_rendering",
+        }
+        step = stage_to_step.get(stage, "story_generation")
+        return _STEP_SUGGESTIONS.get(step, _STEP_SUGGESTIONS["story_generation"])
+    except Exception:
+        return _STEP_SUGGESTIONS["story_generation"]
+
+
 # ── Tool: ask_user ──────────────────────────────────────────────────────
 
 async def tool_ask_user(
@@ -267,6 +338,8 @@ async def tool_ask_user(
     Unlike request_confirmation, this does not imply a blocking confirmation
     gate -- the User can simply reply with text.
 
+    Broadcasts an agent:ask event with step-aware suggestion options.
+
     Args:
         session_id: The session identifier.
         question: The question to ask the user.
@@ -276,10 +349,13 @@ async def tool_ask_user(
     """
     gate: ConfirmationGate = agent_service._confirmation_gate
 
+    options = _get_suggestions_for_step(session_id)
+
     await agent_service.broadcast(session_id, {
-        "type": "agent:ask_user",
+        "type": "agent:ask",
         "session_id": session_id,
         "question": question,
+        "options": options,
     })
 
     result = await gate.wait_for_confirmation(session_id, question)

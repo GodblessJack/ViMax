@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/Toast'
 import { startPlanning, startRendering, getSession, cancelPipeline, getFileUrl } from '@/lib/api'
 import type { WizardStep, ShotInfo } from '@/lib/types'
+import type { StoryboardScene } from '@/stores/types'
 // ── NEW: WorkflowStore wiring (additive alongside existing useState) ──
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useSessionWebSocket } from '@/hooks/useSessionWebSocket'
@@ -87,7 +88,7 @@ export default function CreateDramaPage() {
   const [scenes, setScenes] = useState<any[]>([])
 
   // Step 3 data
-  const [storyboardScenes, setStoryboardScenes] = useState<{ index: number; title: string; shots: ShotInfo[] }[]>([])
+  const [storyboardScenes, setStoryboardScenes] = useState<StoryboardScene[]>([])
   const [sceneIndex, setSceneIndex] = useState(0)
   const [sceneLoading, setSceneLoading] = useState(false)
 

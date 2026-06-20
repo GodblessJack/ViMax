@@ -79,7 +79,7 @@ export default function AIChatPanel({
   storyChars, characterCount, sceneCount, totalShots,
   storeChatMessages, storeAgentSuggestions, onWSSendMessage,
 }: AIChatPanelProps) {
-  const greeting = buildGreeting(1, {})
+  const greeting = buildGreeting(step, { storyChars, characterCount, sceneCount, totalShots })
   const [messages, setMessages] = useState<Message[]>(() => [
     { role: 'ai', text: greeting },
   ])

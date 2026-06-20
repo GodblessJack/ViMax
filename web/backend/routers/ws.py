@@ -175,12 +175,19 @@ async def _handle_client_event(
         if event_type == "user:message":
             message_text = payload.get("message", "") or payload.get("payload", {}).get("text", "")
             if message_text:
-                result = await agent_service.handle_message(session_id, message_text)
-                await websocket.send_json({
-                    "type": "agent:reply",
-                    "session_id": session_id,
-                    "reply": result.get("reply", ""),
-                })
+                confirmation_gate = agent_service.confirmation_gate if hasattr(agent_service, 'confirmation_gate') else None
+                is_waiting = confirmation_gate.is_waiting(session_id) if confirmation_gate else False
+                if is_waiting:
+                    # Gate pending -- resume it with the user's text, do NOT start a new LLM call
+                    await agent_service.handle_suggestion_reply(session_id, message_text)
+                else:
+                    # No gate -- normal message flow
+                    result = await agent_service.handle_message(session_id, message_text)
+                    await websocket.send_json({
+                        "type": "agent:reply",
+                        "session_id": session_id,
+                        "reply": result.get("reply", ""),
+                    })
             else:
                 await websocket.send_json({
                     "type": "event:ack",
