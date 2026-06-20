@@ -102,7 +102,8 @@ async def tool_read_artifact(
 async def tool_run_step(
     session_id: str,
     step_name: str,
-    agent_service: Any,
+    params: dict[str, Any] | None = None,
+    agent_service: Any = None,
 ) -> dict[str, Any]:
     """Execute a single pipeline step (planning or rendering).
 
@@ -117,6 +118,8 @@ async def tool_run_step(
     Args:
         session_id: The session identifier.
         step_name: Which pipeline step to run.
+        params: Optional dict with idea, style, user_requirement, or feedback.
+        agent_service: The AgentService instance for WS broadcast and pipeline access.
 
     Returns:
         Dict with "status": "ok" | "error" and optional "error" message.
@@ -140,29 +143,150 @@ async def tool_run_step(
 
     phase, sub_step = pipeline_steps[step_name]
 
+    import asyncio
+
+    from web.backend.models.api_models import PipelinePlanRequest, PipelineRenderRequest
+    from web.backend.main import get_session_service
+
+    params = params or {}
+
     try:
         await agent_service.broadcast(session_id, {
-            "type": "pipeline_status",
-            "session_id": session_id,
-            "stage": sub_step,
-            "phase": "started",
-            "message": f"Starting step: {step_name}",
+            "type": "step:preparing",
+            "step": step_name,
+            "context": {
+                "inputs": params,
+                "constraints": [],
+                "agentIntent": f"Executing step: {step_name}",
+            },
         })
 
-        # TODO: call the specific step method on the pipeline
-        # For now, emit a started event and return
-        # Actual integration with pipeline service happens in subsequent PRs
-        await agent_service.broadcast(session_id, {
-            "type": "pipeline_status",
-            "session_id": session_id,
-            "stage": sub_step,
-            "phase": "done",
-            "message": f"Step completed: {step_name}",
-        })
+        if phase == "planning":
+            if step_name == "story_generation":
+                # ── Trigger full planning pipeline ──────────────────────
+                request = PipelinePlanRequest(
+                    session_id=session_id,
+                    idea=params.get("idea", ""),
+                    style=params.get("style", "wuxia"),
+                    user_requirement=params.get("user_requirement", ""),
+                )
+
+                await agent_service.broadcast(session_id, {
+                    "type": "step:running",
+                    "step": step_name,
+                    "progress_percent": 0,
+                    "progress_message": "正在构思故事...",
+                })
+
+                cancel_evt = asyncio.Event()
+                await psvc._run_planning(session_id, request, cancel_evt)
+
+                # Verify planning succeeded
+                svc = get_session_service()
+                session = svc.get_session(session_id)
+                if session is not None and getattr(session, "stage", "") in ("error", "cancelled"):
+                    error_msg = getattr(session, "error_message", "") or f"规划失败，阶段: {session.stage}"
+                    raise RuntimeError(error_msg)
+
+                await agent_service.broadcast(session_id, {
+                    "type": "step:completed",
+                    "step": step_name,
+                    "result": {
+                        "summary": "故事构思完成",
+                        "artifactPaths": ["idea2video/story.txt"],
+                        "previewData": None,
+                        "editableFields": [],
+                    },
+                })
+            else:
+                # Non-trigger planning steps — already completed by _run_planning
+                await agent_service.broadcast(session_id, {
+                    "type": "step:running",
+                    "step": step_name,
+                    "progress_percent": 50,
+                    "progress_message": f"规划阶段已完成: {step_name}",
+                })
+                await agent_service.broadcast(session_id, {
+                    "type": "step:completed",
+                    "step": step_name,
+                    "result": {
+                        "summary": f"{step_name} 完成",
+                        "artifactPaths": [],
+                        "previewData": None,
+                        "editableFields": [],
+                    },
+                })
+
+        elif phase == "rendering":
+            if step_name == "character_portraits":
+                # ── Trigger full rendering pipeline ─────────────────────
+                request = PipelineRenderRequest(session_id=session_id)
+
+                await agent_service.broadcast(session_id, {
+                    "type": "step:running",
+                    "step": step_name,
+                    "progress_percent": 0,
+                    "progress_message": "正在生成角色肖像...",
+                })
+
+                cancel_evt = asyncio.Event()
+                await psvc._run_rendering(session_id, cancel_evt)
+
+                # Verify rendering succeeded
+                svc = get_session_service()
+                session = svc.get_session(session_id)
+                if session is not None and getattr(session, "stage", "") in ("error", "cancelled"):
+                    error_msg = getattr(session, "error_message", "") or f"渲染失败，阶段: {session.stage}"
+                    raise RuntimeError(error_msg)
+
+                await agent_service.broadcast(session_id, {
+                    "type": "step:completed",
+                    "step": step_name,
+                    "result": {
+                        "summary": "角色肖像生成完成",
+                        "artifactPaths": [],
+                        "previewData": None,
+                        "editableFields": [],
+                    },
+                })
+            else:
+                # video_rendering — already completed by _run_rendering
+                await agent_service.broadcast(session_id, {
+                    "type": "step:running",
+                    "step": step_name,
+                    "progress_percent": 50,
+                    "progress_message": "渲染阶段已完成: video_rendering",
+                })
+                await agent_service.broadcast(session_id, {
+                    "type": "step:completed",
+                    "step": step_name,
+                    "result": {
+                        "summary": "视频渲染完成",
+                        "artifactPaths": [],
+                        "previewData": None,
+                        "editableFields": [],
+                    },
+                })
 
         return {"status": "ok", "step": step_name}
+
+    except asyncio.CancelledError:
+        logger.info("Step %s cancelled for session %s", step_name, session_id)
+        await agent_service.broadcast(session_id, {
+            "type": "step:error",
+            "step": step_name,
+            "error": "步骤已取消",
+            "recoverable": True,
+        })
+        return {"status": "error", "error": "Step cancelled"}
     except Exception as exc:
         logger.exception("Step %s failed for session %s", step_name, session_id)
+        await agent_service.broadcast(session_id, {
+            "type": "step:error",
+            "step": step_name,
+            "error": str(exc),
+            "recoverable": True,
+        })
         return {"status": "error", "error": str(exc)}
 
 
