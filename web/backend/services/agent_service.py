@@ -552,8 +552,12 @@ class AgentService:
                 i += 1  # Move to next step
 
             # ── Workflow complete ─────────────────────────────────────
+            # Preserve "rendered" stage from rendering pipeline if present
+            final_stage = getattr(svc.get_session(session_id), "stage", "") or ""
+            if final_stage not in ("rendered", "error", "cancelled"):
+                final_stage = "narrative_planned"
             svc._index.update_stage(
-                session_id, "narrative_planned",
+                session_id, final_stage,
                 "Step-by-step workflow complete",
             )
             await self.broadcast(session_id, {

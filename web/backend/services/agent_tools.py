@@ -383,13 +383,33 @@ async def tool_run_step(
                     error_msg = getattr(session, "error_message", "") or f"渲染失败，阶段: {session.stage}"
                     raise RuntimeError(error_msg)
 
+                # Read portrait data for preview
+                svc = get_session_service()
+                wd = svc._index.working_dir(session_id)
+                i2v_dir = wd / "idea2video"
+                portraits_dir = i2v_dir / "character_portraits"
+                portraits = []
+                if portraits_dir.exists():
+                    for char_dir in sorted(portraits_dir.iterdir()):
+                        if char_dir.is_dir():
+                            views = {}
+                            for img in sorted(char_dir.glob("*.png")):
+                                views[img.stem] = str(img.relative_to(i2v_dir))
+                            if views:
+                                parts = char_dir.name.split("_", 1)
+                                portraits.append({
+                                    "character_name": parts[1] if len(parts) > 1 else char_dir.name,
+                                    "character_id": parts[0] if len(parts) > 0 else "",
+                                    "views": views,
+                                })
+
                 await agent_service.broadcast(session_id, {
                     "type": "step:completed",
                     "step": step_name,
                     "result": {
-                        "summary": "角色肖像生成完成",
-                        "artifactPaths": [],
-                        "previewData": None,
+                        "summary": f"已生成 {len(portraits)} 个角色的肖像",
+                        "artifactPaths": [f"idea2video/character_portraits/{p['character_id']}_{p['character_name']}/*.png" for p in portraits],
+                        "previewData": {"portraits": portraits} if portraits else None,
                         "editableFields": [],
                     },
                 })
@@ -401,13 +421,18 @@ async def tool_run_step(
                     "progress_percent": 50,
                     "progress_message": "渲染阶段已完成: video_rendering",
                 })
+                # Check if final video exists
+                svc = get_session_service()
+                wd = svc._index.working_dir(session_id)
+                video_path = wd / "idea2video" / "final_video.mp4"
+                has_video = video_path.exists()
                 await agent_service.broadcast(session_id, {
                     "type": "step:completed",
                     "step": step_name,
                     "result": {
-                        "summary": "视频渲染完成",
-                        "artifactPaths": [],
-                        "previewData": None,
+                        "summary": "视频渲染完成" if has_video else "视频渲染完成（mock）",
+                        "artifactPaths": ["idea2video/final_video.mp4"] if has_video else [],
+                        "previewData": {"finalVideoUrl": f"/api/files/{session_id}/final_video"} if has_video else None,
                         "editableFields": [],
                     },
                 })

@@ -955,6 +955,10 @@ class PipelineService:
                 "error": "Rendering was cancelled",
             })
         except asyncio.TimeoutError:
+            if MOCK_MODE:
+                logger.warning("Rendering timed out for session %s — falling back to mock data", session_id)
+                await self._generate_mock_rendering(session_id)
+                return
             self._record_render_failure(session_id)
             logger.exception("Rendering timed out for session %s", session_id)
             friendly = "渲染超时 — AI 服务响应过慢，请重试或减少镜头数"
@@ -964,6 +968,10 @@ class PipelineService:
                 "error": friendly,
             })
         except Exception as exc:
+            if MOCK_MODE:
+                logger.warning("Rendering failed for session %s — falling back to mock data: %s", session_id, exc)
+                await self._generate_mock_rendering(session_id)
+                return
             self._record_render_failure(session_id)
             logger.exception("Rendering failed for session %s", session_id)
             friendly = f"渲染失败: {_friendly_error(exc)}"
@@ -1015,6 +1023,57 @@ class PipelineService:
         return {"cancelled": True, "session_id": session_id}
 
     # ── Circuit breaker helpers ───────────────────────────────────────
+
+    async def _generate_mock_rendering(self, session_id: str) -> None:
+        """Generate mock portrait and video data when rendering is unavailable."""
+        import shutil
+        wd = self._session_index.working_dir(session_id)
+        i2v_dir = wd / "idea2video"
+
+        # Load characters for portrait metadata
+        chars_path = i2v_dir / "characters.json"
+        chars_data = []
+        if chars_path.exists():
+            try:
+                chars_data = json.loads(chars_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+        # 1) Mock character portraits — create placeholder images
+        portraits_dir = i2v_dir / "character_portraits"
+        portraits_dir.mkdir(parents=True, exist_ok=True)
+        portrait_entries = []
+        for c in chars_data[:4]:  # max 4 characters
+            name = c.get("name", c.get("identifier_in_scene", "unknown"))
+            char_dir = portraits_dir / f"{c.get('idx', 0)}_{name}"
+            char_dir.mkdir(parents=True, exist_ok=True)
+            for view in ["front", "side", "back"]:
+                img_path = char_dir / f"{view}.png"
+                if not img_path.exists():
+                    # Create a tiny valid PNG placeholder (1x1 pixel)
+                    img_path.write_bytes(
+                        b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01'
+                        b'\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde'
+                        b'\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05'
+                        b'\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82'
+                    )
+            portrait_entries.append({
+                "character_name": name,
+                "character_id": c.get("identifier_in_scene", name),
+                "views": {"front": f"character_portraits/{c.get('idx', 0)}_{name}/front.png",
+                          "side": f"character_portraits/{c.get('idx', 0)}_{name}/side.png",
+                          "back": f"character_portraits/{c.get('idx', 0)}_{name}/back.png"},
+            })
+
+        # 2) Mock video — create minimal MP4 placeholder
+        video_path = i2v_dir / "final_video.mp4"
+        if not video_path.exists():
+            # Write a placeholder text file (real MP4 generation needs ffmpeg)
+            video_path.write_text("mock_video_placeholder", encoding="utf-8")
+
+        self._session_index.update_stage(session_id, "rendered", "Rendering complete (mock)")
+
+        logger.info("Mock rendering data generated for session %s (%d portraits)", session_id, len(portrait_entries))
 
     def _record_render_failure(self, session_id: str) -> None:
         """Record a render failure timestamp for circuit breaker tracking."""
