@@ -59,11 +59,14 @@ export function useSessionWebSocket(sessionId: string | null) {
     try {
       const ws = new WebSocket(wsUrl)
 
+      let wasOpened = false
+
       ws.onopen = () => {
         if (!mountedRef.current) {
           ws.close()
           return
         }
+        wasOpened = true
         retriesRef.current = 0
         sessionIdRef.current = sid
         store.setConnectionState('connected')
@@ -85,8 +88,21 @@ export function useSessionWebSocket(sessionId: string | null) {
         }, PING_INTERVAL_MS)
       }
 
-      ws.onclose = () => {
+      ws.onclose = (e: CloseEvent) => {
         if (!mountedRef.current) return
+
+        // If the connection never opened (e.g. Vite HMR reload killed it),
+        // don't trigger the full disconnect flow — the browser already
+        // logs a warning; we just retry silently.
+        if (!wasOpened && retriesRef.current < MAX_RETRIES) {
+          const delay = Math.min(1000 * Math.pow(2, retriesRef.current), 16000)
+          timerRef.current = setTimeout(() => {
+            retriesRef.current++
+            connect(sid)
+          }, delay)
+          return
+        }
+
         store.setWsSendFn(null)
         store.setConnectionState('disconnected')
         if (pingTimerRef.current) {
@@ -122,7 +138,9 @@ export function useSessionWebSocket(sessionId: string | null) {
       }
 
       ws.onerror = () => {
-        // onclose will fire after this
+        // Suppress: onclose will fire after this.
+        // The browser's built-in WebSocket error logging cannot be
+        // entirely suppressed, but we avoid logging additional noise here.
       }
 
       wsRef.current = ws
