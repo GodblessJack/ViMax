@@ -513,6 +513,31 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
       case 'step:completed': {
         get().setRuntimeResult(event.step, event.result)
         get().setStepStatus(event.step as WorkflowStepName, 'completed')
+
+        // Fetch full artifacts for story/character/script steps
+        const sid = get().sessionId
+        if (sid && event.result?.artifactPaths?.length) {
+          const base = `/api/files/${sid}/idea2video`
+          const store = get()
+          for (const p of event.result.artifactPaths) {
+            if (p === 'idea2video/story.txt' && !store.story) {
+              fetch(`${base}/story.txt`)
+                .then(r => r.ok ? r.text() : null)
+                .then(t => { if (t) store.setStory(t) })
+                .catch(() => {})
+            } else if (p === 'idea2video/characters.json' && store.characters.length === 0) {
+              fetch(`${base}/characters.json`)
+                .then(r => r.ok ? r.json() : null)
+                .then(d => { if (d) store.setCharacters(Array.isArray(d) ? d : []) })
+                .catch(() => {})
+            } else if (p === 'idea2video/script.json' && store.scenes.length === 0) {
+              fetch(`${base}/script.json`)
+                .then(r => r.ok ? r.json() : null)
+                .then(d => { if (d) store.setScenes(Array.isArray(d) ? d : []) })
+                .catch(() => {})
+            }
+          }
+        }
         break
       }
       case 'step:error': {
@@ -521,7 +546,8 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
         break
       }
       case 'step:need_confirm': {
-        get().setRuntimePhase(event.step, 'running')
+        // Keep phase as-is (should be 'done' from step:completed) so the
+        // result panel stays visible while waiting for user confirmation.
         get().setPendingConfirmation({
           stepIndex: get().steps.find((s) => s.name === event.step)?.index ?? 0,
           stepName: event.step,

@@ -9,6 +9,8 @@ export function StepActions({ step }: { step: WorkflowStep }) {
   const confirmStep = useWorkflowStore((s) => s.confirmStep)
   const requestRegenerate = useWorkflowStore((s) => s.requestRegenerate)
   const sendWsMessage = useWorkflowStore((s) => s.sendWsMessage)
+  const sessionId = useWorkflowStore((s) => s.sessionId)
+  const connectionState = useWorkflowStore((s) => s.connectionState)
 
   const isDone = runtime?.phase === 'done'
   const isError = !!runtime?.error
@@ -16,6 +18,22 @@ export function StepActions({ step }: { step: WorkflowStep }) {
   const isLastStep = step.index === 5
 
   if (!isDone) return null
+
+  const doConfirm = async () => {
+    confirmStep(step.index)
+    // Try WS first; fall back to REST
+    if (connectionState === 'connected') {
+      sendWsMessage({ type: 'user:confirm', step: step.name })
+    } else {
+      try {
+        await fetch(`/api/pipeline/confirm/${sessionId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ step: step.name }),
+        })
+      } catch { /* ignore */ }
+    }
+  }
 
   return (
     <div className="step-actions flex items-center justify-center gap-3 p-4 border-t">
@@ -32,10 +50,7 @@ export function StepActions({ step }: { step: WorkflowStep }) {
       {/* Confirm */}
       {step.requiresConfirmation && !isConfirmed && !isError && (
         <button
-          onClick={() => {
-            confirmStep(step.index)
-            sendWsMessage({ type: 'user:confirm', step: step.name })
-          }}
+          onClick={doConfirm}
           className="px-6 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors font-medium"
         >
           确认，进入下一步

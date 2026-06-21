@@ -40,9 +40,10 @@ function renderText(text: string | null | undefined) {
   }
 
   return segments.map((seg, i) => {
+    const content = seg.content ?? ''
     // Split by newlines within text segments
     if (seg.type === 'text') {
-      const lines = seg.content.split('\n')
+      const lines = content.split('\n')
       return lines.map((line, j) => (
         <span key={`${i}-${j}`}>
           {j > 0 && <br />}
@@ -51,12 +52,12 @@ function renderText(text: string | null | undefined) {
       ))
     }
     if (seg.type === 'bold') {
-      return <strong key={`bold-${i}`}>{seg.content}</strong>
+      return <strong key={`bold-${i}`}>{content}</strong>
     }
     if (seg.type === 'code') {
       return (
         <code key={`code-${i}`} className="px-1 py-0.5 rounded bg-muted text-[0.85em] font-mono">
-          {seg.content}
+          {content}
         </code>
       )
     }

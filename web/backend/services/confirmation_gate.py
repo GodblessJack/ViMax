@@ -34,6 +34,8 @@ class ConfirmationGate:
     def __init__(self) -> None:
         self._events: dict[str, asyncio.Event] = {}
         self._results: dict[str, dict[str, Any]] = {}
+        self._pending_prompts: dict[str, str] = {}  # session_id → step_name
+        self._pending_steps: dict[str, str] = {}    # session_id → step_name (machine key)
 
     # ── Agent-facing API ────────────────────────────────────────────────
 
@@ -43,6 +45,7 @@ class ConfirmationGate:
         prompt: str,
         context: dict[str, Any] | None = None,
         timeout: float = 1800.0,  # 30 minutes default
+        step_name: str = "",
     ) -> dict[str, Any]:
         """Block the Agent until the user responds or the timeout fires.
 
@@ -55,7 +58,10 @@ class ConfirmationGate:
         event = asyncio.Event()
         self._events[session_id] = event
         self._results.pop(session_id, None)
+        self._pending_prompts[session_id] = prompt
+        self._pending_steps[session_id] = step_name or prompt
 
+        logger.warning("ConfirmationGate: WAITING for session %s (prompt=%.80s, timeout=%s)", session_id, prompt, timeout)
         try:
             await asyncio.wait_for(event.wait(), timeout=timeout)
         except asyncio.TimeoutError:
@@ -65,8 +71,12 @@ class ConfirmationGate:
                 "payload": {},
                 "reply": "等待超时",
             }
+        else:
+            logger.warning("ConfirmationGate: RESOLVED for session %s", session_id)
         finally:
             self._events.pop(session_id, None)
+            self._pending_prompts.pop(session_id, None)
+            self._pending_steps.pop(session_id, None)
 
         return self._results.pop(
             session_id,
@@ -97,6 +107,13 @@ class ConfirmationGate:
         ev = self._events.get(session_id)
         return ev is not None and not ev.is_set()
 
+    def waiting_step(self, session_id: str) -> str | None:
+        """Return the machine step name that is awaiting confirmation, or None."""
+        ev = self._events.get(session_id)
+        if ev is not None and not ev.is_set():
+            return self._pending_steps.get(session_id)
+        return None
+
     def cancel(self, session_id: str) -> None:
         """Cancel a pending confirmation (e.g. on pipeline abort)."""
         self._results[session_id] = {
@@ -104,6 +121,8 @@ class ConfirmationGate:
             "payload": {},
             "reply": "操作已取消",
         }
+        self._pending_prompts.pop(session_id, None)
+        self._pending_steps.pop(session_id, None)
         ev = self._events.get(session_id)
         if ev is not None:
             ev.set()

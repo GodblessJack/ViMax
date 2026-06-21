@@ -317,50 +317,38 @@ async def tool_run_step(
                             },
                         })
                 elif step_name == "storyboard_design":
-                    sb_path = i2v_dir / "scene_0" / "storyboard.json"
-                    if sb_path.exists():
+                    # Collect all scene storyboards and send structured preview
+                    storyboards = []
+                    for sc_p in sorted(i2v_dir.glob("scene_*/storyboard.json")):
                         try:
-                            sb_data = json.loads(sb_path.read_text(encoding="utf-8"))
-                            shot_count = len(sb_data) if isinstance(sb_data, list) else 0
-                            shot_descs = []
-                            if isinstance(sb_data, list):
-                                for s in sb_data:
-                                    desc = s.get("visual_description", "")[:60]
-                                    if desc:
-                                        shot_descs.append(desc + "…")
-                            await agent_service.broadcast(session_id, {
-                                "type": "step:completed",
-                                "step": step_name,
-                                "result": {
-                                    "summary": f"已设计 {shot_count} 个镜头 (scene_0)",
-                                    "artifactPaths": ["idea2video/scene_0/storyboard.json"],
-                                    "previewData": {"shotCount": shot_count, "shotDescriptions": shot_descs},
-                                    "editableFields": [],
-                                },
+                            sc_data = json.loads(sc_p.read_text(encoding="utf-8"))
+                            scene_idx = int(sc_p.parent.name.split("_")[-1]) if "_" in sc_p.parent.name else 0
+                            shots = []
+                            if isinstance(sc_data, list):
+                                for j, s in enumerate(sc_data):
+                                    shots.append({
+                                        "idx": j + 1,
+                                        "visual_desc": s.get("visual_description", "")[:120],
+                                        "angle": s.get("camera_angle", s.get("angle", "中景")),
+                                    })
+                            storyboards.append({
+                                "index": scene_idx,
+                                "title": f"场景 {scene_idx + 1}",
+                                "shots": shots,
                             })
-                        except Exception as read_err:
-                            logger.warning("Failed to read storyboard.json for step %s: %s", step_name, read_err)
-                            await agent_service.broadcast(session_id, {
-                                "type": "step:completed",
-                                "step": step_name,
-                                "result": {
-                                    "summary": f"{step_name} 完成（文件读取失败）",
-                                    "artifactPaths": ["idea2video/scene_0/storyboard.json"],
-                                    "previewData": None,
-                                    "editableFields": [],
-                                },
-                            })
-                    else:
-                        await agent_service.broadcast(session_id, {
-                            "type": "step:completed",
-                            "step": step_name,
-                            "result": {
-                                "summary": f"{step_name} 完成",
-                                "artifactPaths": ["idea2video/scene_0/storyboard.json"],
-                                "previewData": None,
-                                "editableFields": [],
-                            },
-                        })
+                        except Exception:
+                            pass
+                    total_shots = sum(len(sb["shots"]) for sb in storyboards)
+                    await agent_service.broadcast(session_id, {
+                        "type": "step:completed",
+                        "step": step_name,
+                        "result": {
+                            "summary": f"已设计 {len(storyboards)} 个场景共 {total_shots} 个镜头",
+                            "artifactPaths": [f"idea2video/scene_{sb['index']}/storyboard.json" for sb in storyboards],
+                            "previewData": storyboards,
+                            "editableFields": [],
+                        },
+                    })
                 else:
                     await agent_service.broadcast(session_id, {
                         "type": "step:completed",

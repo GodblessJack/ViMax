@@ -18,29 +18,92 @@ function useStepResultData(
   const artifacts = useWorkflowStore((s) => s.artifacts)
   const finalVideoUrl = useWorkflowStore((s) => s.finalVideoUrl)
 
-  // Server-supplied previewData takes priority
-  if (previewData !== undefined && previewData !== null) return previewData
+  // Store data (full content) is authoritative for content-heavy steps.
+  // PreviewData from WS is metadata-only — use it for initial display only
+  // when store data hasn't arrived yet.
+  const storeFallback = _storeData(stepName, { story, characters, scenes, storyboardScenes, artifacts, finalVideoUrl })
 
-  // Fall back to step-specific store data
+  // Prefer full store data over preview metadata
+  if (_isContentful(storeFallback)) return storeFallback
+
+  // Unwrap preview object for initial display
+  const resolved = _resolvePreview(stepName, previewData)
+  if (_isContentful(resolved)) return resolved
+
+  return storeFallback ?? resolved ?? undefined
+}
+
+function _storeData(stepName: WorkflowStepName, s: {
+  story: string; characters: unknown[]; scenes: unknown[]
+  storyboardScenes: unknown[]; artifacts: Record<string, unknown>
+  finalVideoUrl: string | null
+}): unknown {
+  switch (stepName) {
+    case 'story_generation': return s.story || undefined
+    case 'character_extraction': return s.characters.length > 0 ? s.characters : undefined
+    case 'script_writing': return s.scenes.length > 0 ? s.scenes : undefined
+    case 'storyboard_design': return s.storyboardScenes.length > 0 ? s.storyboardScenes : undefined
+    case 'character_portraits': return s.artifacts['portraits'] ?? undefined
+    case 'video_rendering':
+      return s.finalVideoUrl ? { finalVideoUrl: s.finalVideoUrl }
+        : s.artifacts['final_video'] ?? undefined
+    default: return undefined
+  }
+}
+
+function _isContentful(v: unknown): boolean {
+  if (v === undefined || v === null) return false
+  if (typeof v === 'string') return v.length > 0
+  if (Array.isArray(v)) return v.length > 0
+  if (typeof v === 'object') return Object.keys(v as object).length > 0
+  return true
+}
+
+/**
+ * Unwrap backend preview objects into data the result panels expect.
+ * Backend sends metadata envelopes like {storyPreview, totalChars, paragraphCount}
+ * or {characterNames, count}. Extract the core data from these envelopes.
+ */
+function _resolvePreview(stepName: WorkflowStepName, previewData: unknown): unknown {
+  if (previewData === undefined || previewData === null) return undefined
+  if (typeof previewData !== 'object' || Array.isArray(previewData)) {
+    return previewData
+  }
+
+  const obj = previewData as Record<string, unknown>
+
   switch (stepName) {
     case 'story_generation':
-      return story ? story : undefined
-    case 'character_extraction':
-      return characters.length > 0 ? characters : undefined
-    case 'script_writing':
-      return scenes.length > 0 ? scenes : undefined
-    case 'storyboard_design':
-      return storyboardScenes.length > 0 ? storyboardScenes : undefined
-    case 'character_portraits':
-      return artifacts['portraits'] ?? undefined
-    case 'video_rendering':
-      return finalVideoUrl
-        ? { finalVideoUrl }
-        : artifacts['final_video']
-          ? artifacts['final_video']
-          : undefined
-    default:
+      if (typeof obj.storyPreview === 'string' && obj.storyPreview.length > 0) {
+        return obj.storyPreview
+      }
       return undefined
+
+    case 'character_extraction':
+      // Backend sends {characterNames: [...], count: N}
+      if (Array.isArray(obj.characterNames)) return obj.characterNames
+      if (Array.isArray(obj.characters)) return obj.characters
+      return undefined
+
+    case 'script_writing':
+      if (Array.isArray(obj.scenes)) return obj.scenes
+      if (typeof obj.script_preview === 'string') return obj.script_preview
+      return undefined
+
+    case 'storyboard_design':
+      if (Array.isArray(obj.storyboards)) return obj.storyboards
+      if (typeof obj.sceneCount === 'number') return obj // metadata, panel handles it
+      return undefined
+
+    case 'character_portraits':
+      if (Array.isArray(obj.portraits)) return obj.portraits
+      return undefined
+
+    case 'video_rendering':
+      return obj
+
+    default:
+      return previewData
   }
 }
 

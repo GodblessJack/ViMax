@@ -1,5 +1,7 @@
 """Pipeline plan/render/cancel router."""
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 
 from web.backend.models.api_models import (
@@ -70,3 +72,27 @@ async def cancel_pipeline(session_id: str):
     if result.get("error"):
         raise HTTPException(status_code=404, detail=result["error"])
     return result
+
+
+@router.get("/confirm-status/{session_id}")
+async def get_confirm_status(session_id: str):
+    """REST fallback: check if a step is waiting for user confirmation.
+
+    Returns { waiting: bool, step: string|null } so the frontend can
+    show the correct step result panel and confirm/regenerate buttons
+    even when WebSocket isn't connected.
+    """
+    from web.backend.main import get_agent_service
+    asvc = get_agent_service()
+    step = asvc.confirmation_gate.waiting_step(session_id)
+    return {"waiting": step is not None, "step": step}
+
+
+@router.post("/confirm/{session_id}")
+async def confirm_step(session_id: str, body: dict[str, Any] | None = None):
+    """REST fallback: confirm the current step (unblock the confirmation gate)."""
+    from web.backend.main import get_agent_service
+    asvc = get_agent_service()
+    payload = body or {}
+    await asvc.handle_confirm(session_id, payload)
+    return {"status": "confirmed"}

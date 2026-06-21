@@ -471,6 +471,7 @@ class AgentService:
                             session_id=session_id,
                             prompt=f"步骤 {step_name} 执行失败: {error_msg}",
                             timeout=1800.0,
+                            step_name=step_name,
                         )
                         action = gate_result.get("action", "")
                         if action == "cancelled":
@@ -514,12 +515,15 @@ class AgentService:
                     "suggestions": ["确认", "重新生成", "需要修改"],
                 })
 
+                logger.warning("Workflow: WAITING for confirmation on step %s (session %s)", step_name, session_id)
                 try:
                     gate_result = await self._confirmation_gate.wait_for_confirmation(
                         session_id=session_id,
                         prompt=f"{step_name} 已完成，请确认",
                         timeout=1800.0,
+                        step_name=step_name,
                     )
+                    logger.warning("Workflow: GOT confirmation result for step %s: %s", step_name, gate_result.get("action"))
                     action = gate_result.get("action", "")
                     if action == "cancelled":
                         svc._index.update_stage(session_id, "cancelled", "用户取消")

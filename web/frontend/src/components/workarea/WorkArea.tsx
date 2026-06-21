@@ -33,81 +33,129 @@ export function WorkArea() {
   const setRuntimeResult = useWorkflowStore((s) => s.setRuntimeResult)
   const currentStep = steps[currentStepIndex]
 
-  // Poll session stage when no WS events are received (fallback)
+  // Poll for confirmation status and load artifacts.
+  // Uses the REST confirmation-status endpoint as the source of truth for
+  // which step is currently awaiting user confirmation.  Does NOT drive
+  // step progression from session stage — that is the WS event handler's job.
   useEffect(() => {
     if (!sessionId) return
     let timer: ReturnType<typeof setInterval>
-    let lastStage = sessionStage
+    let lastWsActivity = Date.now()
+
+    const unsub = useWorkflowStore.subscribe((state, prev) => {
+      if (state.runtime !== prev.runtime) lastWsActivity = Date.now()
+    })
 
     timer = setInterval(async () => {
       try {
-        const resp = await fetch(`/api/sessions/${sessionId}`)
-        const detail = await resp.json()
-        if (!detail || detail.stage === lastStage) return
-        lastStage = detail.stage
+        const store = useWorkflowStore.getState()
 
-        // Load artifact content when stage advances
-        if (detail.artifact_checklist) {
+        // If WS is actively driving state, don't interfere
+        if (Date.now() - lastWsActivity < 8000) return
+
+        // Poll confirmation status
+        const csResp = await fetch(`/api/pipeline/confirm-status/${sessionId}`)
+        if (!csResp.ok) return
+        const cs = await csResp.json() as { waiting: boolean; step: string | null }
+
+        // If backend is waiting for confirmation on a step, ensure frontend
+        // shows that step as done with confirm button, and don't advance.
+        if (cs.waiting && cs.step) {
           const store = useWorkflowStore.getState()
-          const baseUrl = `/api/files/${sessionId}/idea2video`
-
-          try {
-            if (detail.artifact_checklist.story) {
-              const r = await fetch(`${baseUrl}/story.txt`)
-              if (r.ok) store.setStory(await r.text())
+          const stepIdx = store.steps.find(s => s.name === cs.step)?.index
+          if (stepIdx !== undefined) {
+            // Only set state if this step doesn't already have WS-driven data
+            const existing = store.runtime[cs.step]
+            if (!existing || existing.phase !== 'done') {
+              // Load artifacts if needed
+              await _loadArtifacts(sessionId, store)
+              // Mark previous steps as completed and this step as done+waiting
+              const stepNames: WorkflowStepName[] = [
+                'story_generation', 'character_extraction', 'script_writing',
+                'storyboard_design', 'character_portraits', 'video_rendering',
+              ]
+              for (let i = 0; i < stepNames.length; i++) {
+                const sn = stepNames[i]
+                const ext = store.runtime[sn]
+                if (ext?.phase === 'done' || ext?.phase === 'running') continue
+                if (i < stepIdx) {
+                  setRuntimeResult(sn, {
+                    summary: `${sn} 已完成`,
+                    artifactPaths: [],
+                    previewData:
+                      i === 0 ? store.story :
+                      i === 1 ? store.characters :
+                      i === 2 ? store.scenes : null,
+                    editableFields: [],
+                  })
+                  setRuntimePhase(sn, 'done')
+                  setStepStatus(sn, 'completed')
+                } else if (i === stepIdx) {
+                  setRuntimePhase(sn, 'done')
+                  setStepStatus(sn, 'completed')
+                  // Set pending confirmation so StepActions shows confirm button
+                  if (!store.pendingConfirmation) {
+                    store.setPendingConfirmation({
+                      stepIndex: i,
+                      stepName: sn,
+                      message: `${sn} 已完成，请审阅确认`,
+                      suggestions: ['确认', '重新生成', '需要修改'],
+                      timestamp: Date.now(),
+                    })
+                  }
+                }
+              }
+              goToStep(stepIdx)
             }
-            if (detail.artifact_checklist.characters) {
-              const r = await fetch(`${baseUrl}/characters.json`)
-              if (r.ok) store.setCharacters(await r.json())
-            }
-            if (detail.artifact_checklist.script) {
-              const r = await fetch(`${baseUrl}/script.json`)
-              if (r.ok) store.setScenes(await r.json())
-            }
-            // Update runtime results with artifact content
-            const completedUpTo = STAGE_TO_STEP[detail.stage] ?? 0
-            const stepNames = ['story_generation','character_extraction','script_writing','storyboard_design','character_portraits','video_rendering'] as WorkflowStepName[]
-            for (let i = 0; i < completedUpTo && i < stepNames.length; i++) {
-              setRuntimeResult(stepNames[i], {
-                summary: `${stepNames[i]} 已完成`,
-                artifactPaths: [],
-                previewData: i === 0 ? store.story : i === 1 ? store.characters : i === 2 ? store.scenes : null,
-                editableFields: [],
-              })
-              setRuntimePhase(stepNames[i], 'done')
-            }
-          } catch { /* ignore fetch errors */ }
-        }
-        const stepNames: WorkflowStepName[] = [
-          'story_generation', 'character_extraction', 'script_writing',
-          'storyboard_design', 'character_portraits', 'video_rendering',
-        ]
-
-        // Mark all steps up to completedUpTo as completed
-        for (let i = 0; i < stepNames.length; i++) {
-          const status: StepStatus = i < completedUpTo ? 'completed' :
-            i === completedUpTo ? 'running' : 'idle'
-          setStepStatus(stepNames[i], status)
-          if (i === completedUpTo) {
-            setRuntimePhase(stepNames[i], 'running')
-          }
-          if (i < completedUpTo) {
-            setRuntimeResult(stepNames[i], {
-              summary: `步骤已完成`,
-              artifactPaths: [],
-              previewData: null,
-              editableFields: [],
-            })
-            setRuntimePhase(stepNames[i], 'done')
           }
         }
 
-        goToStep(Math.min(completedUpTo, stepNames.length - 1))
+        // Always try loading artifacts regardless of confirmation state
+        await _loadArtifacts(sessionId, useWorkflowStore.getState())
       } catch { /* ignore poll errors */ }
     }, 2000)
 
-    return () => clearInterval(timer)
-  }, [sessionId, sessionStage, goToStep, setStepStatus, setRuntimePhase, setRuntimeResult])
+    return () => {
+      clearInterval(timer)
+      unsub()
+    }
+
+    async function _loadArtifacts(sessionId: string, store: ReturnType<typeof useWorkflowStore.getState>) {
+      const baseUrl = `/api/files/${sessionId}/idea2video`
+      try {
+        if (!store.story) {
+          const r = await fetch(`${baseUrl}/story.txt`)
+          if (r.ok) store.setStory(await r.text())
+        }
+        if (store.characters.length === 0) {
+          const r = await fetch(`${baseUrl}/characters.json`)
+          if (r.ok) store.setCharacters(await r.json())
+        }
+        if (store.scenes.length === 0) {
+          const r = await fetch(`${baseUrl}/script.json`)
+          if (r.ok) store.setScenes(await r.json())
+        }
+        if (store.storyboardScenes.length === 0) {
+          const r = await fetch(`${baseUrl}/scene_0/storyboard.json`)
+          if (r.ok) {
+            const data = await r.json()
+            if (Array.isArray(data)) {
+              const scenes = [{
+                index: 0,
+                title: '场景 1',
+                shots: data.map((s: any, i: number) => ({
+                  idx: i + 1,
+                  visual_desc: s.visual_description?.slice(0, 120) || '',
+                  angle: s.camera_angle || s.angle || '中景',
+                })),
+              }]
+              store.setStoryboardScenes(scenes)
+            }
+          }
+        }
+      } catch { /* ignore fetch errors */ }
+    }
+  }, [sessionId, goToStep, setStepStatus, setRuntimePhase, setRuntimeResult])
 
   if (!sessionId) {
     return <CreativeSettings />

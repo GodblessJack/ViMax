@@ -629,35 +629,35 @@ class PipelineService:
             "url": f"/api/files/{session_id}/idea2video/story.txt",
         })
 
-        # ── 2. Characters ──────────────────────────────────────────────
+        # ── 2. Characters (must match CharacterInScene schema) ─────────
         characters = [
             {
-                "name": "林风",
+                "idx": 0,
                 "identifier_in_scene": "林风",
-                "description": "白衣少年侠客，手持师父遗留的青冥剑，武功高强但初涉江湖，性格正直热血，其身世与二十年前一桩江湖旧案有着千丝万缕的联系。",
-                "appearance": "约二十岁，身着白色长袍，长发束冠，面容清俊，眼神中透着坚毅与些许迷茫",
-                "personality": "正义感强烈，心地纯善但不失机敏，面对强敌时冷静沉着",
+                "is_visible": True,
+                "static_features": "约二十岁，身着白色长袍，长发束冠，面容清俊，眼神中透着坚毅与些许迷茫 — 白衣少年侠客，手持师父遗留的青冥剑",
+                "dynamic_features": "正义感强烈，心地纯善但不失机敏，面对强敌时冷静沉着，白色长袍随身形飘动",
             },
             {
-                "name": "柳如烟",
+                "idx": 1,
                 "identifier_in_scene": "柳如烟",
-                "description": "绿衫女子，出身医药世家，精通医术与毒术，被铁剑门追杀，与主角林风命运交织。",
-                "appearance": "约十八九岁，身着翠绿色纱裙，容貌秀丽，柳眉皓齿，手持银针为武器",
-                "personality": "外冷内热，警惕性高，因家族变故而对人充满戒备，但内心善良",
+                "is_visible": True,
+                "static_features": "约十八九岁，身着翠绿色纱裙，容貌秀丽，柳眉皓齿，手持银针为武器 — 出身医药世家的绿衫女子",
+                "dynamic_features": "外冷内热，警惕性高，因家族变故而对人充满戒备，翠绿纱裙轻盈飘逸",
             },
             {
-                "name": "铁无痕",
+                "idx": 2,
                 "identifier_in_scene": "铁无痕",
-                "description": "铁剑门掌门，武功盖世，为夺取青冥剑不择手段，是二十年前那场恩怨的核心人物。",
-                "appearance": "约五十余岁，身材魁梧，面目威严，双手布满老茧，一双鹰目令人不寒而栗",
-                "personality": "野心勃勃，城府极深，为达目的不惜一切手段",
+                "is_visible": True,
+                "static_features": "约五十余岁，身材魁梧，面目威严，双手布满老茧，一双鹰目令人不寒而栗 — 铁剑门掌门",
+                "dynamic_features": "野心勃勃，城府极深，为达目的不惜一切手段，身着重甲气势逼人",
             },
             {
-                "name": "白云道长",
+                "idx": 3,
                 "identifier_in_scene": "白云道长",
-                "description": "得道高人，隐居深山三十载，看似不问世事，实则与青冥剑的来历有着密切关系。",
-                "appearance": "约七十余岁，白发白须，仙风道骨，手持拂尘，身着灰色道袍",
-                "personality": "看透世事，言语玄奥，关键时刻指点迷津",
+                "is_visible": True,
+                "static_features": "约七十余岁，白发白须，仙风道骨，手持拂尘，身着灰色道袍 — 隐居深山的得道高人",
+                "dynamic_features": "看透世事，言语玄奥，关键时刻指点迷津，拂尘轻挥仙气缭绕",
             },
         ]
 
