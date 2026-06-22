@@ -243,9 +243,29 @@ class PipelineService:
     # ── Pipeline builders ─────────────────────────────────────────────
 
     def _build_chat_model(self, multimodal: bool = False):
+        """Build a chat model. V3: uses ANTHROPIC_* env vars (DeepSeek relay)
+        as primary, falling back to agent_runtime config / DashScope."""
+        import os
         from langchain.chat_models import init_chat_model
         root = str(self._root)
         ds_key = os.environ.get("DASHSCOPE_API_KEY", "")
+
+        # ── V3: Primary path — ANTHROPIC_* env vars (DeepSeek via Anthropic SDK) ─
+        anthro_key = os.environ.get("ANTHROPIC_AUTH_TOKEN", "") or os.environ.get("ANTHROPIC_API_KEY", "")
+        anthro_base = os.environ.get("ANTHROPIC_BASE_URL", "")
+        anthro_model = os.environ.get("ANTHROPIC_MODEL", "deepseek-v4-pro[1m]")
+
+        if anthro_key and anthro_base:
+            # Use ChatAnthropic with DeepSeek relay (Anthropic-compatible)
+            from langchain_anthropic import ChatAnthropic
+            return ChatAnthropic(
+                model=anthro_model,
+                anthropic_api_key=anthro_key,
+                anthropic_api_url=anthro_base,
+                timeout=300,
+                max_retries=0,
+                max_tokens=4096,
+            )
 
         # Rendering needs a vision-capable model (ReferenceImageSelector sends image_url)
         if multimodal and ds_key:
@@ -264,11 +284,11 @@ class PipelineService:
         provider = llm_model_provider(root)
         base = llm_base_url(root)
 
-        # DashScope fallback: use DASHSCOPE_API_KEY when primary key is missing
+        # DashScope fallback
         if ds_key and not api_key:
             api_key = ds_key
             base = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            model = "qwen-plus"  # DashScope-compatible model (not google/*)
+            model = "qwen-plus"
             provider = "openai"
 
         return init_chat_model(
