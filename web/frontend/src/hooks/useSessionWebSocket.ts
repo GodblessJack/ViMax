@@ -40,15 +40,15 @@ export function useSessionWebSocket(sessionId: string | null) {
     if (!mountedRef.current) return
 
     if (retriesRef.current >= MAX_RETRIES) {
-      store.setConnectionState('disconnected')
+      useWorkflowStore.getState().setConnectionState('disconnected')
       logger.warn('useSessionWebSocket: max retries reached', { sessionId: sid })
       return
     }
 
     if (retriesRef.current > 0) {
-      store.setConnectionState('reconnecting')
+      useWorkflowStore.getState().setConnectionState('reconnecting')
     } else {
-      store.setConnectionState('connecting')
+      useWorkflowStore.getState().setConnectionState('connecting')
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -207,7 +207,7 @@ export function useSessionWebSocket(sessionId: string | null) {
         }, delay)
       }
     }
-  }, [store])
+  }, []) // stable — uses useWorkflowStore.getState() internally
 
   // ── Send event (client → server) ────────────────────────────────────
   const sendEvent = useCallback((event: WsClientEvent) => {
