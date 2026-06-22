@@ -46,7 +46,7 @@ export function CreativeSettings() {
         sid = createResp.session_id
         setSessionId(sid)
         setWizardStep(2)
-        logger.info('CreativeSettings: session created', { sessionId: sid })
+        logger.state('CreativeSettings: session created: ' + sid)
       }
 
       // Step 2: wait briefly for WS connection
@@ -57,7 +57,7 @@ export function CreativeSettings() {
       sendWsMessage({ type: 'user:message', message })
       logger.userAction('start_workflow_from_creative_settings', { sessionId: sid })
     } catch (err) {
-      logger.error('CreativeSettings: failed to start workflow', err)
+      logger.error('CreativeSettings start workflow', err)
     } finally {
       setStarting(false)
     }
