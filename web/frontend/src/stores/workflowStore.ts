@@ -391,6 +391,7 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
       return {
         confirmedSteps: next,
         pendingConfirmations: [],
+        postStepConfirmData: null,  // ── V3: clear structured post-confirm data ──
       }
     }),
   requestRegenerate: (index, feedback) => {
@@ -644,6 +645,20 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
       case 'artifact:updated': {
         logger.debug('workflowStore: artifact updated', { key: event.artifact_key })
         get().updateArtifact(event.artifact_key, event.content)
+        // ── V3: track diff for audit trail ──
+        if (event.diff) {
+          const oldContent = event.diff.old_value !== undefined ? String(event.diff.old_value) : null
+          const newContent = event.diff.new_value !== undefined ? String(event.diff.new_value) : null
+          get().addArtifactDiff({
+            artifactPath: event.diff.path || event.artifact_key,
+            oldContent,
+            newContent,
+            diff: '',
+            changedBy: 'agent',
+            source: 'Agent',
+            timestamp: Date.now(),
+          })
+        }
         break
       }
       case 'agent:message': {
@@ -687,6 +702,10 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
         if (event.current_step) {
           get().setActiveStepName(event.current_step as WorkflowStepName)
         }
+        // ── V3: recover pending confirmation state on reconnect ──
+        if (event.confirmation_state) {
+          get().handleSyncConfirmation(event.confirmation_state)
+        }
         break
       }
       case 'agent:reply': {
@@ -703,10 +722,20 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
         break
       }
       case 'agent:confirm_ack': {
-        const stepName = (event as any).step
-        if (stepName) {
-          const stepIdx = get().steps.find((s) => s.name === stepName)?.index
-          if (stepIdx !== undefined) get().confirmStep(stepIdx)
+        // ── V3: phase-aware confirmation acknowledgement ──
+        const ackPhase = (event as any).phase
+        if (ackPhase === 'before') {
+          // Pre-exec confirm ACK — the server has received our confirm/reject.
+          // Clear preStepConfirmData and syncState (step hasn't executed yet).
+          get().clearConfirmationState()
+        } else {
+          // Post-exec confirm ACK (or legacy no-phase) — step is done.
+          const stepName = (event as any).step
+          if (stepName) {
+            const stepIdx = get().steps.find((s) => s.name === stepName)?.index
+            if (stepIdx !== undefined) get().confirmStep(stepIdx)
+          }
+          get().clearConfirmationState()
         }
         break
       }
@@ -774,6 +803,15 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
         for (const change of event.changes) {
           get().addConfigChange(change)
           get().updateArtifact(change.path, change.newValue)
+          // ── V3: propagate idea/style changes to store fields ──
+          // Agent-driven creative setting changes should sync to
+          // CreativeSettings so both panels stay in sync.
+          if (change.path === 'idea' || change.field === 'idea') {
+            get().setIdea(String(change.newValue ?? ''))
+          }
+          if (change.path === 'style' || change.field === 'style') {
+            get().setStyle(String(change.newValue ?? ''))
+          }
         }
         break
       }

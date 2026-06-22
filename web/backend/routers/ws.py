@@ -198,13 +198,33 @@ async def session_websocket(websocket: WebSocket, session_id: str):
     asvc.register_ws_callback(session_id, _ws_send)
 
     try:
-        # Send a welcome/connected event
-        await websocket.send_json({
+        # Send a welcome/connected event with V3 confirmation_state for reconnect recovery
+        welcome: dict = {
             "type": "connected",
             "session_id": session_id,
             "current_step": "",
             "session_stage": "created",
-        })
+        }
+        # ── V3: include confirmation_state if a gate is pending ──
+        try:
+            gate = asvc.confirmation_gate
+            pending = gate.get_pending_state(session_id)
+            if pending.get("waiting"):
+                welcome["confirmation_state"] = {
+                    "isPending": True,
+                    "phase": pending.get("phase"),
+                    "stepName": pending.get("step_name"),
+                    "stepIndex": None,
+                    "message": pending.get("context", {}).get("message", ""),
+                    "suggestions": [],
+                    "lastConfirmationSource": None,
+                    "confirmedBy": None,
+                    "timestamp": None,
+                    "timeoutAt": None,
+                }
+        except Exception:
+            pass  # fail-open: don't block connection for missing confirmation state
+        await websocket.send_json(welcome)
 
         while True:
             try:
@@ -289,6 +309,7 @@ async def _handle_client_event(
             await websocket.send_json({
                 "type": "agent:confirm_ack",
                 "session_id": session_id,
+                "phase": "after",
             })
 
         elif event_type == "user:modify":
@@ -338,6 +359,7 @@ async def _handle_client_event(
                 "type": "agent:confirm_ack",
                 "session_id": session_id,
                 "step": step,
+                "phase": "before",
             })
 
         elif event_type == "user:reject_before":
@@ -351,6 +373,7 @@ async def _handle_client_event(
                 "type": "agent:confirm_ack",
                 "session_id": session_id,
                 "step": step,
+                "phase": "before",
             })
 
     except Exception:

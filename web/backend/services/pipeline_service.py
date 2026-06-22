@@ -1335,6 +1335,383 @@ class PipelineService:
             "final_video_url": final_video_url,
         }
 
+    # ── V3 Public API: generic step dispatch ────────────────────────────
+
+    async def run_step(
+        self,
+        session_id: str,
+        step_name: str,
+        params: dict[str, Any] | None = None,
+        cancel_evt: asyncio.Event | None = None,
+    ) -> dict[str, Any]:
+        """Generic step execution dispatcher.
+
+        Routes to the appropriate per-step method based on step_name.
+        For multi-scene steps (storyboard_design, video_rendering), iterates
+        over sub-scenes.
+
+        Args:
+            session_id: The session to run the step for.
+            step_name: Machine step name (e.g. "story_generation").
+            params: Optional parameters dict (idea, style, user_requirement, etc.).
+            cancel_evt: Optional asyncio.Event to signal cancellation.
+
+        Returns:
+            {"status": "ok" | "error", "artifacts": [...], "result": ...}
+        """
+        p = params or {}
+        idx = self._session_index or None
+
+        if idx is not None:
+            wd = idx.working_dir(session_id)
+            idea = p.get("idea", "") or (idx.get(session_id) or {}).get("idea", "")
+            style = p.get("style", "") or (idx.get(session_id) or {}).get("style", "wuxia")
+            user_requirement = p.get("user_requirement", "") or (idx.get(session_id) or {}).get("user_requirement", "")
+        else:
+            wd = None
+            idea = p.get("idea", "")
+            style = p.get("style", "wuxia")
+            user_requirement = p.get("user_requirement", "")
+
+        try:
+            if step_name == "story_generation":
+                result = await self.run_story_generation(
+                    session_id, idea=idea, style=style,
+                    user_requirement=user_requirement,
+                )
+                return {"status": "ok", "artifacts": result.get("artifacts", []), "result": result}
+
+            elif step_name == "character_extraction":
+                result = await self.run_character_extraction(session_id)
+                return {"status": "ok", "artifacts": result.get("artifacts", []), "result": result}
+
+            elif step_name == "script_writing":
+                result = await self.run_script_writing(session_id)
+                return {"status": "ok", "artifacts": result.get("artifacts", []), "result": result}
+
+            elif step_name == "storyboard_design":
+                scenes = p.get("scenes", [])
+                if not scenes:
+                    # Read scenes from script.json if not provided
+                    script_path = wd / "idea2video" / "script.json" if wd else None
+                    if script_path and script_path.exists():
+                        try:
+                            script_data = json.loads(script_path.read_text("utf-8"))
+                            scenes = script_data if isinstance(script_data, list) else script_data.get("scenes", [])
+                        except Exception:
+                            scenes = [{"index": 0}, {"index": 1}, {"index": 2}]
+                    else:
+                        scenes = [{"index": 0}, {"index": 1}, {"index": 2}]
+                results = []
+                for scene in scenes:
+                    if cancel_evt and cancel_evt.is_set():
+                        return {"status": "cancelled", "artifacts": [], "result": {}}
+                    scene_idx = scene.get("index", scene.get("idx", 0)) if isinstance(scene, dict) else scene
+                    r = await self.run_storyboard_scene(session_id, scene_idx=scene_idx)
+                    results.append(r)
+                return {"status": "ok", "artifacts": [r.get("artifacts", []) for r in results], "result": results}
+
+            elif step_name == "character_portraits":
+                result = await self.run_character_portrait(session_id)
+                return {"status": "ok", "artifacts": result.get("artifacts", []), "result": result}
+
+            elif step_name == "video_rendering":
+                scenes = p.get("scenes", [])
+                if not scenes:
+                    script_path = wd / "idea2video" / "script.json" if wd else None
+                    if script_path and script_path.exists():
+                        try:
+                            script_data = json.loads(script_path.read_text("utf-8"))
+                            scenes = script_data if isinstance(script_data, list) else script_data.get("scenes", [])
+                        except Exception:
+                            scenes = [{"index": 0}, {"index": 1}, {"index": 2}]
+                    else:
+                        scenes = [{"index": 0}, {"index": 1}, {"index": 2}]
+                results = []
+                for scene in scenes:
+                    if cancel_evt and cancel_evt.is_set():
+                        return {"status": "cancelled", "artifacts": [], "result": {}}
+                    scene_idx = scene.get("index", scene.get("idx", 0)) if isinstance(scene, dict) else scene
+                    r = await self.run_video_scene(session_id, scene_idx=scene_idx)
+                    results.append(r)
+                return {"status": "ok", "artifacts": [r.get("artifacts", []) for r in results], "result": results}
+
+            else:
+                return {"status": "error", "error": f"Unknown step name: {step_name}"}
+
+        except asyncio.CancelledError:
+            return {"status": "cancelled", "error": "Step cancelled"}
+        except Exception as exc:
+            logger.exception("run_step failed for session %s step %s", session_id, step_name)
+            return {"status": "error", "error": _friendly_error(exc)}
+
+    # ── V3 Public API: artifact modification ──────────────────────────
+
+    def modify_artifact(
+        self,
+        session_id: str,
+        artifact_path: str,
+        content: Any,
+    ) -> dict[str, Any]:
+        """Modify an artifact file in the session working directory.
+
+        Generates a diff between old and new content, writes the new file,
+        and returns the diff for downstream broadcasting.
+
+        Args:
+            session_id: The session whose artifact to modify.
+            artifact_path: Relative path within the session (e.g. "idea2video/story.txt").
+            content: New content to write (str for text, dict for JSON).
+
+        Returns:
+            {"status": "ok", "artifact_path": ..., "old_content": ..., "new_content": ..., "diff": "..."}
+        """
+        wd = self._session_index.working_dir(session_id)
+        file_path = wd / artifact_path
+
+        # Read old content
+        old_content: str | None = None
+        if file_path.exists():
+            try:
+                old_content = file_path.read_text(encoding="utf-8")
+            except Exception:
+                old_content = None
+
+        # Serialize new content
+        if isinstance(content, str):
+            new_content = content
+        elif isinstance(content, (dict, list)):
+            new_content = json.dumps(content, ensure_ascii=False, indent=2)
+        else:
+            new_content = str(content)
+
+        # Generate diff
+        diff_text = ""
+        if old_content is not None:
+            import difflib
+            diff_lines = list(difflib.unified_diff(
+                old_content.splitlines(keepends=True),
+                new_content.splitlines(keepends=True),
+                fromfile=f"a/{artifact_path}",
+                tofile=f"b/{artifact_path}",
+            ))
+            diff_text = "".join(diff_lines)
+
+        # Write new file
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(new_content, encoding="utf-8")
+
+        return {
+            "status": "ok",
+            "artifact_path": artifact_path,
+            "old_content": old_content,
+            "new_content": new_content,
+            "diff": diff_text,
+        }
+
+    # ── V3 Public API: pipeline introspection ─────────────────────────
+
+    def inspect_pipeline(self, session_id: str) -> dict[str, Any]:
+        """Return detailed pipeline progress and sub-step status.
+
+        Returns:
+            {
+                "session_id": str,
+                "stage": str,
+                "completed_steps": [...],
+                "current_step": str | None,
+                "total_steps": 6,
+                "sub_steps": {
+                    "storyboard_design": {"total": N, "completed": M},
+                    "video_rendering": {"total": N, "completed": M},
+                },
+                "artifacts": {"path": {"exists": bool, "size": int, "lastModified": str}},
+            }
+        """
+        idx = self._session_index
+        session = idx.get(session_id) if idx else None
+        stage = (session or {}).get("stage", "created")
+
+        wd = idx.working_dir(session_id) if idx else None
+        i2v = wd / "idea2video" if wd else None
+
+        # Determine completed steps from artifact presence
+        completed_steps: list[str] = []
+        artifacts: dict[str, dict[str, Any]] = {}
+
+        if i2v:
+            # Check each artifact
+            story_path = i2v / "story.txt"
+            if story_path.exists():
+                completed_steps.append("story_generation")
+                artifacts["idea2video/story.txt"] = {
+                    "exists": True,
+                    "size": story_path.stat().st_size,
+                    "lastModified": datetime.fromtimestamp(story_path.stat().st_mtime).isoformat(),
+                }
+
+            chars_path = i2v / "characters.json"
+            if chars_path.exists():
+                completed_steps.append("character_extraction")
+                artifacts["idea2video/characters.json"] = {
+                    "exists": True,
+                    "size": chars_path.stat().st_size,
+                    "lastModified": datetime.fromtimestamp(chars_path.stat().st_mtime).isoformat(),
+                }
+
+            script_path = i2v / "script.json"
+            if script_path.exists():
+                completed_steps.append("script_writing")
+                artifacts["idea2video/script.json"] = {
+                    "exists": True,
+                    "size": script_path.stat().st_size,
+                    "lastModified": datetime.fromtimestamp(script_path.stat().st_mtime).isoformat(),
+                }
+
+            # Storyboard sub-scenes
+            sb_total = 0
+            sb_completed = 0
+            for scene_dir in sorted(i2v.glob("scene_*")):
+                sb_total += 1
+                sb_json = scene_dir / "storyboard.json"
+                artifacts[f"idea2video/{scene_dir.name}/storyboard.json"] = {
+                    "exists": sb_json.exists(),
+                    "size": sb_json.stat().st_size if sb_json.exists() else 0,
+                    "lastModified": datetime.fromtimestamp(sb_json.stat().st_mtime).isoformat() if sb_json.exists() else None,
+                }
+                if sb_json.exists():
+                    sb_completed += 1
+            if sb_total > 0:
+                if "storyboard_design" not in completed_steps and sb_completed > 0:
+                    completed_steps.append("storyboard_design")
+
+            # Character portraits
+            portraits_dir = i2v / "character_portraits"
+            if portraits_dir.exists():
+                completed_steps.append("character_portraits")
+                for img_file in portraits_dir.glob("**/*.png"):
+                    rel = str(img_file.relative_to(wd))
+                    artifacts[rel] = {
+                        "exists": True,
+                        "size": img_file.stat().st_size,
+                        "lastModified": datetime.fromtimestamp(img_file.stat().st_mtime).isoformat(),
+                    }
+
+            # Video scenes
+            vid_total = 0
+            vid_completed = 0
+            for scene_dir in sorted(i2v.glob("scene_*")):
+                vid_total += 1
+                output_mp4 = scene_dir / "output.mp4"
+                if output_mp4.exists():
+                    vid_completed += 1
+            if vid_total > 0 and vid_completed > 0:
+                if "video_rendering" not in completed_steps:
+                    completed_steps.append("video_rendering")
+
+        # Current step inference
+        current_step: str | None = None
+        if completed_steps:
+            step_order = [
+                "story_generation", "character_extraction", "script_writing",
+                "storyboard_design", "character_portraits", "video_rendering",
+            ]
+            last_idx = max(step_order.index(s) for s in completed_steps if s in step_order)
+            if last_idx < 5:
+                current_step = step_order[last_idx + 1]
+
+        return {
+            "session_id": session_id,
+            "stage": stage,
+            "completed_steps": completed_steps,
+            "current_step": current_step,
+            "total_steps": 6,
+            "sub_steps": {
+                "storyboard_design": {
+                    "total": sb_total if i2v else 0,
+                    "completed": sb_completed if i2v else 0,
+                },
+                "video_rendering": {
+                    "total": vid_total if i2v else 0,
+                    "completed": vid_completed if i2v else 0,
+                },
+            },
+            "artifacts": artifacts,
+        }
+
+    # ── V3 Public API: step plan ──────────────────────────────────────
+
+    def get_step_plan(self, session_id: str, step_name: str) -> dict[str, Any]:
+        """Return the planned sub-steps / configuration for a given step.
+
+        Args:
+            session_id: The session to query.
+            step_name: Machine step name.
+
+        Returns:
+            {
+                "step_name": str,
+                "sub_steps": [...],        # list of sub-step descriptors
+                "artifacts": [...],        # expected output artifact paths
+                "dependencies": [...],     # prerequisite step names
+                "estimated_duration": str,
+            }
+        """
+        STEP_PLANS: dict[str, dict] = {
+            "story_generation": {
+                "step_name": "story_generation",
+                "sub_steps": ["parse_intent", "develop_story", "save_artifact"],
+                "artifacts": ["idea2video/story.txt"],
+                "dependencies": [],
+                "estimated_duration": "约 30 秒",
+            },
+            "character_extraction": {
+                "step_name": "character_extraction",
+                "sub_steps": ["read_story", "extract_characters", "save_artifact"],
+                "artifacts": ["idea2video/characters.json"],
+                "dependencies": ["story_generation"],
+                "estimated_duration": "约 20 秒",
+            },
+            "script_writing": {
+                "step_name": "script_writing",
+                "sub_steps": ["read_context", "write_script", "save_artifact"],
+                "artifacts": ["idea2video/script.json"],
+                "dependencies": ["story_generation", "character_extraction"],
+                "estimated_duration": "约 30 秒",
+            },
+            "storyboard_design": {
+                "step_name": "storyboard_design",
+                "sub_steps": ["read_script", "plan_scene_0", "plan_scene_1", "plan_scene_2", "save_artifacts"],
+                "artifacts": ["idea2video/scene_0/storyboard.json", "idea2video/scene_1/storyboard.json", "idea2video/scene_2/storyboard.json"],
+                "dependencies": ["script_writing"],
+                "estimated_duration": "约 60 秒 (多场景)",
+            },
+            "character_portraits": {
+                "step_name": "character_portraits",
+                "sub_steps": ["read_characters", "generate_front", "generate_side", "generate_back", "save_artifacts"],
+                "artifacts": ["idea2video/character_portraits/"],
+                "dependencies": ["character_extraction", "storyboard_design"],
+                "estimated_duration": "约 2 分钟 (多角色)",
+            },
+            "video_rendering": {
+                "step_name": "video_rendering",
+                "sub_steps": ["render_scene_0", "render_scene_1", "render_scene_2", "compose_final"],
+                "artifacts": ["idea2video/scene_0/output.mp4", "idea2video/scene_1/output.mp4", "idea2video/scene_2/output.mp4", "idea2video/final_video.mp4"],
+                "dependencies": ["storyboard_design", "character_portraits"],
+                "estimated_duration": "约 5 分钟 (多场景)",
+            },
+        }
+        if step_name in STEP_PLANS:
+            return STEP_PLANS[step_name]
+        return {
+            "step_name": step_name,
+            "sub_steps": [],
+            "artifacts": [],
+            "dependencies": [],
+            "estimated_duration": "未知",
+            "error": f"Unknown step: {step_name}",
+        }
+
     # ── Public API: cancel ────────────────────────────────────────────
 
     def running_session_ids(self) -> list[str]:

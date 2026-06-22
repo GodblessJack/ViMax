@@ -261,12 +261,12 @@ export type WsServerEvent =
   | { type: 'agent:ask'; question: string; options?: { label: string; value: string }[] }
   | { type: 'pipeline:status'; stage: string; message: string }
   | { type: 'pipeline:complete'; stage: string; final_video_url?: string }
-  | { type: 'connected'; session_id: string; current_step: string; session_stage: string }
+  | { type: 'connected'; session_id: string; current_step: string; session_stage: string; confirmation_state?: ConfirmationSyncState }
   // New WS event types (V2 architecture alignment)
   | { type: 'agent:workflow_started'; session_id: string; session_stage?: string; message?: string }
   | { type: 'agent:reply'; session_id?: string; reply: string }
   | { type: 'agent:regenerate_ack'; session_id?: string; step?: string }
-  | { type: 'agent:confirm_ack'; session_id?: string; step?: string }
+  | { type: 'agent:confirm_ack'; session_id?: string; step?: string; phase?: 'before' | 'after' }
   | { type: 'agent:navigate'; session_id?: string; step_index: number; target_step?: string }
   | { type: 'event:ack'; event_type: string; session_id: string }
   | { type: 'event:error'; event_type: string; session_id: string; error: string }

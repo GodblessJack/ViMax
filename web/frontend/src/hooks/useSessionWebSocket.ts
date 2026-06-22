@@ -166,6 +166,13 @@ export function useSessionWebSocket(sessionId: string | null) {
               })
               for (const change of event.changes) {
                 store.updateArtifact(change.path, change.newValue)
+                // ── V3: propagate idea/style changes to store ──
+                if (change.path === 'idea' || change.field === 'idea') {
+                  store.setIdea(String(change.newValue ?? ''))
+                }
+                if (change.path === 'style' || change.field === 'style') {
+                  store.setStyle(String(change.newValue ?? ''))
+                }
               }
               break
             }

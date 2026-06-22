@@ -53,15 +53,48 @@ class ConfirmationGate:
     """
 
     def __init__(self) -> None:
-        self._events: dict[str, asyncio.Event] = {}
-        self._results: dict[str, dict[str, Any]] = {}
-        self._pending_prompts: dict[str, str] = {}     # session_id → prompt
-        self._pending_steps: dict[str, str] = {}        # session_id → step_name (machine key)
-        # ── V3: phase & context tracking ────────────────────────────────
-        self._pending_phases: dict[str, str] = {}       # session_id → "before" | "after"
-        self._pending_contexts: dict[str, dict[str, Any]] = {}  # session_id → context dict
+        # Per-phase event tracking (V3): key=(session_id, phase) tuple
+        # Allows simultaneous "before" and "after" confirmations on the same session.
+        self._events: dict[tuple[str, str], asyncio.Event] = {}
+        self._results: dict[tuple[str, str], dict[str, Any]] = {}
+        self._pending_prompts: dict[tuple[str, str], str] = {}     # (sid,phase) → prompt
+        self._pending_steps: dict[tuple[str, str], str] = {}       # (sid,phase) → step_name
+        # ── V3: phase & context tracking (also per-phase) ────────────────
+        self._pending_phases: dict[str, str] = {}       # session_id → current active phase ("before"|"after")
+        self._pending_contexts: dict[tuple[str, str], dict[str, Any]] = {}  # (sid,phase) → context dict
         # ── V3: optional broadcast callback for sending WS events ───────
         self._broadcast_callback: Callable[..., Any] | None = None
+
+    # ── Internal helpers ──────────────────────────────────────────────
+
+    def _key(self, session_id: str, phase: str | None = None) -> tuple[str, str]:
+        """Generate event key. If phase is None, auto-detect from pending_phases.
+
+        Falls back to "after" when no pending phase is recorded (e.g. legacy
+        callers that don't supply a phase).
+        """
+        if phase is None:
+            phase = self._pending_phases.get(session_id, "after")
+        return (session_id, phase)
+
+    def _keys_for_session(self, session_id: str) -> list[tuple[str, str]]:
+        """Return all compound keys for a session (across all phases)."""
+        return [k for k in self._events if k[0] == session_id]
+
+    async def _broadcast_state(self, session_id: str, state: dict[str, Any]) -> None:
+        """Send sync:confirmation_state to connected clients (if callback registered)."""
+        if self._broadcast_callback is not None:
+            try:
+                await self._broadcast_callback(session_id, {
+                    "type": "sync:confirmation_state",
+                    "session_id": session_id,
+                    "state": state,
+                })
+            except Exception:
+                logger.exception(
+                    "Failed to broadcast sync:confirmation_state for session %s",
+                    session_id,
+                )
 
     # ── V3: broadcast callback registration ─────────────────────────────
 
@@ -100,14 +133,15 @@ class ConfirmationGate:
             On timeout:        {"action": "timeout", "payload": {},
                                 "reply": "等待超时"}
         """
+        key = self._key(session_id, phase)
         event = asyncio.Event()
-        self._events[session_id] = event
-        self._results.pop(session_id, None)
-        self._pending_prompts[session_id] = prompt
-        self._pending_steps[session_id] = step_name or prompt
+        self._events[key] = event
+        self._results.pop(key, None)
+        self._pending_prompts[key] = prompt
+        self._pending_steps[key] = step_name or prompt
         # ── V3: track phase and context ─────────────────────────────────
         self._pending_phases[session_id] = phase
-        self._pending_contexts[session_id] = context or {}
+        self._pending_contexts[key] = context or {}
 
         logger.warning(
             "ConfirmationGate: WAITING for session %s phase=%s step=%s (prompt=%.80s, timeout=%s)",
@@ -116,23 +150,35 @@ class ConfirmationGate:
         try:
             await asyncio.wait_for(event.wait(), timeout=timeout)
         except asyncio.TimeoutError:
-            logger.warning("Confirmation timeout for session %s (prompt=%.80s)", session_id, prompt)
-            self._results[session_id] = {
+            logger.warning("Confirmation timeout for session %s phase=%s (prompt=%.80s)", session_id, phase, prompt)
+            self._results[key] = {
                 "action": "timeout",
                 "payload": {},
                 "reply": "等待超时",
             }
+            # ── V3: broadcast sync:confirmation_state to clear stale UI ──
+            await self._broadcast_state(session_id, {
+                "isPending": False,
+                "phase": None,
+                "stepName": None,
+                "stepIndex": None,
+                "message": None,
+                "suggestions": [],
+                "lastConfirmationSource": None,
+                "confirmedBy": None,
+                "timestamp": None,
+                "timeoutAt": None,
+            })
         else:
-            logger.warning("ConfirmationGate: RESOLVED for session %s", session_id)
+            logger.warning("ConfirmationGate: RESOLVED for session %s phase=%s", session_id, phase)
         finally:
-            self._events.pop(session_id, None)
-            self._pending_prompts.pop(session_id, None)
-            self._pending_steps.pop(session_id, None)
-            self._pending_phases.pop(session_id, None)
-            self._pending_contexts.pop(session_id, None)
+            self._events.pop(key, None)
+            self._pending_prompts.pop(key, None)
+            self._pending_steps.pop(key, None)
+            self._pending_contexts.pop(key, None)
 
         return self._results.pop(
-            session_id,
+            key,
             {"action": "timeout", "payload": {}, "reply": "未知错误"},
         )
 
@@ -194,14 +240,16 @@ class ConfirmationGate:
                 )
                 # Fail-open: proceed to block even if broadcast fails
 
-        # ── Block on Event (same mechanism as wait_for_confirmation) ────
+        # ── Block on Event (per-phase keying) ────────────────────────
+        phase = "before"
+        key = self._key(session_id, phase)
         event = asyncio.Event()
-        self._events[session_id] = event
-        self._results.pop(session_id, None)
-        self._pending_prompts[session_id] = f"Pre-step confirm: {step_name}"
-        self._pending_steps[session_id] = step_name
-        self._pending_phases[session_id] = "before"
-        self._pending_contexts[session_id] = ctx
+        self._events[key] = event
+        self._results.pop(key, None)
+        self._pending_prompts[key] = f"Pre-step confirm: {step_name}"
+        self._pending_steps[key] = step_name
+        self._pending_phases[session_id] = phase
+        self._pending_contexts[key] = ctx
 
         logger.warning(
             "ConfirmationGate: PRE_STEP WAITING for session %s step=%s (timeout=%s)",
@@ -214,25 +262,37 @@ class ConfirmationGate:
                 "ConfirmationGate: PRE_STEP timeout for session %s step=%s",
                 session_id, step_name,
             )
-            self._results[session_id] = {
+            self._results[key] = {
                 "action": "timeout",
                 "payload": {},
                 "reply": "等待超时",
             }
+            # ── V3: broadcast sync:confirmation_state to clear stale UI ──
+            await self._broadcast_state(session_id, {
+                "isPending": False,
+                "phase": None,
+                "stepName": None,
+                "stepIndex": None,
+                "message": None,
+                "suggestions": [],
+                "lastConfirmationSource": None,
+                "confirmedBy": None,
+                "timestamp": None,
+                "timeoutAt": None,
+            })
         else:
             logger.warning(
                 "ConfirmationGate: PRE_STEP RESOLVED for session %s step=%s",
                 session_id, step_name,
             )
         finally:
-            self._events.pop(session_id, None)
-            self._pending_prompts.pop(session_id, None)
-            self._pending_steps.pop(session_id, None)
-            self._pending_phases.pop(session_id, None)
-            self._pending_contexts.pop(session_id, None)
+            self._events.pop(key, None)
+            self._pending_prompts.pop(key, None)
+            self._pending_steps.pop(key, None)
+            self._pending_contexts.pop(key, None)
 
         return self._results.pop(
-            session_id,
+            key,
             {"action": "timeout", "payload": {}, "reply": "未知错误"},
         )
 
@@ -249,7 +309,17 @@ class ConfirmationGate:
                 "context": dict | None,    # Confirmation context (params, etc.)
             }
         """
-        ev = self._events.get(session_id)
+        # Check all phases for this session (per-phase keying)
+        phase = self._pending_phases.get(session_id)
+        if phase is None:
+            return {
+                "waiting": False,
+                "step_name": None,
+                "phase": None,
+                "context": None,
+            }
+        key = (session_id, phase)
+        ev = self._events.get(key)
         waiting = ev is not None and not ev.is_set()
         if not waiting:
             return {
@@ -260,9 +330,9 @@ class ConfirmationGate:
             }
         return {
             "waiting": True,
-            "step_name": self._pending_steps.get(session_id),
-            "phase": self._pending_phases.get(session_id),
-            "context": self._pending_contexts.get(session_id),
+            "step_name": self._pending_steps.get(key),
+            "phase": phase,
+            "context": self._pending_contexts.get(key),
         }
 
     def get_pending_confirmations(self) -> list[dict[str, Any]]:
@@ -271,15 +341,18 @@ class ConfirmationGate:
         Each entry is the same dict shape as get_pending_state().
         """
         result: list[dict[str, Any]] = []
-        for sid, ev in self._events.items():
+        seen_sids: set[str] = set()
+        for (sid, phase), ev in self._events.items():
             if ev is not None and not ev.is_set():
-                result.append({
-                    "session_id": sid,
-                    "waiting": True,
-                    "step_name": self._pending_steps.get(sid),
-                    "phase": self._pending_phases.get(sid),
-                    "context": self._pending_contexts.get(sid),
-                })
+                if sid not in seen_sids:
+                    seen_sids.add(sid)
+                    result.append({
+                        "session_id": sid,
+                        "waiting": True,
+                        "step_name": self._pending_steps.get((sid, phase)),
+                        "phase": phase,
+                        "context": self._pending_contexts.get((sid, phase)),
+                    })
         return result
 
     def is_any_waiting(self) -> bool:
@@ -291,56 +364,150 @@ class ConfirmationGate:
 
     # ── WebSocket handler-facing API ────────────────────────────────────
 
-    def resume(self, session_id: str, result: dict[str, Any]) -> None:
+    def resume(self, session_id: str, result: dict[str, Any], phase: str | None = None) -> None:
         """Deliver the user's response and unblock the Agent.
 
         Called by the WebSocket event handler when a user:confirm,
         user:modify, user:message, user:confirm_before, or
         user:reject_before event arrives.
+
+        Args:
+            session_id: The session to resume.
+            result: The result dict (action, payload, reply).
+            phase: Optional phase hint. If None, auto-detected from
+                   _pending_phases (backward compatible).
         """
-        self._results[session_id] = result
-        event = self._events.get(session_id)
+        key = self._key(session_id, phase)
+        self._results[key] = result
+        event = self._events.get(key)
         if event is not None:
             event.set()
-            logger.debug("Resumed confirmation gate for session %s", session_id)
+            logger.debug("Resumed confirmation gate for session %s phase=%s", session_id, key[1])
         else:
+            # Fallback: try legacy session_id-only lookup for callers that
+            # don't have phase context (e.g. generic handle_confirm).
+            for k in self._keys_for_session(session_id):
+                self._results[k] = result
+                ev = self._events.get(k)
+                if ev is not None:
+                    ev.set()
+                    logger.debug("Resumed confirmation gate for session %s phase=%s (fallback)", session_id, k[1])
+                    return
             logger.warning(
-                "No pending confirmation for session %s -- event discarded",
-                session_id,
+                "No pending confirmation for session %s (tried phase=%s) -- event discarded",
+                session_id, key[1],
             )
 
-    def is_waiting(self, session_id: str) -> bool:
-        """Return True if the Agent is currently blocked on this session."""
-        ev = self._events.get(session_id)
-        return ev is not None and not ev.is_set()
+    def is_waiting(self, session_id: str, phase: str | None = None) -> bool:
+        """Return True if the Agent is currently blocked on this session.
+
+        Args:
+            session_id: The session to check.
+            phase: Optional phase to check. If None, checks any phase
+                   (backward compatible).
+        """
+        if phase is not None:
+            key = (session_id, phase)
+            ev = self._events.get(key)
+            return ev is not None and not ev.is_set()
+        # Check all phases for this session
+        for k in self._keys_for_session(session_id):
+            ev = self._events.get(k)
+            if ev is not None and not ev.is_set():
+                return True
+        return False
 
     def waiting_step(self, session_id: str) -> str | None:
         """Return the machine step name that is awaiting confirmation, or None."""
-        ev = self._events.get(session_id)
+        phase = self._pending_phases.get(session_id)
+        if phase is None:
+            return None
+        key = (session_id, phase)
+        ev = self._events.get(key)
         if ev is not None and not ev.is_set():
-            return self._pending_steps.get(session_id)
+            return self._pending_steps.get(key)
         return None
 
     def waiting_phase(self, session_id: str) -> str | None:
         """Return the confirmation phase ("before" | "after") for a pending
         confirmation, or None if no confirmation is pending."""
-        ev = self._events.get(session_id)
-        if ev is not None and not ev.is_set():
-            return self._pending_phases.get(session_id)
-        return None
+        return self._pending_phases.get(session_id)
 
-    def cancel(self, session_id: str) -> None:
-        """Cancel a pending confirmation (e.g. on pipeline abort)."""
-        self._results[session_id] = {
-            "action": "cancelled",
-            "payload": {},
-            "reply": "操作已取消",
-        }
-        self._pending_prompts.pop(session_id, None)
-        self._pending_steps.pop(session_id, None)
+    async def cancel(self, session_id: str, phase: str | None = None) -> None:
+        """Cancel a pending confirmation (e.g. on pipeline abort).
+
+        Broadcasts sync:confirmation_state to clear stale UI on connected clients.
+        Safe to call from both sync and async contexts (broadcast is best-effort).
+
+        Args:
+            session_id: The session to cancel.
+            phase: Optional phase to cancel. If None, cancels all phases
+                   for the session.
+        """
+        if phase is not None:
+            keys = [(session_id, phase)]
+        else:
+            keys = self._keys_for_session(session_id)
+
+        for key in keys:
+            self._results[key] = {
+                "action": "cancelled",
+                "payload": {},
+                "reply": "操作已取消",
+            }
+            self._pending_prompts.pop(key, None)
+            self._pending_steps.pop(key, None)
+            self._pending_contexts.pop(key, None)
+            ev = self._events.get(key)
+            if ev is not None:
+                ev.set()
+
+        # Clear pending phase for this session
         self._pending_phases.pop(session_id, None)
-        self._pending_contexts.pop(session_id, None)
-        ev = self._events.get(session_id)
-        if ev is not None:
-            ev.set()
-        logger.debug("Cancelled confirmation gate for session %s", session_id)
+
+        # ── V3: broadcast sync:confirmation_state to clear stale UI ──
+        # Use best-effort scheduling so this works from both sync and async callers.
+        await self._broadcast_state(session_id, {
+            "isPending": False,
+            "phase": None,
+            "stepName": None,
+            "stepIndex": None,
+            "message": None,
+            "suggestions": [],
+            "lastConfirmationSource": None,
+            "confirmedBy": None,
+            "timestamp": None,
+            "timeoutAt": None,
+        })
+
+        logger.debug("Cancelled confirmation gate for session %s (phases: %s)", session_id, [k[1] for k in keys])
+
+    def cancel_sync(self, session_id: str, phase: str | None = None) -> None:
+        """Synchronous wrapper for cancel() that fires-and-forgets the broadcast.
+
+        Use this from sync contexts (e.g. cleanup_session).
+        """
+        import asyncio as _asyncio
+        try:
+            loop = _asyncio.get_running_loop()
+            loop.create_task(self.cancel(session_id, phase))
+        except RuntimeError:
+            # No running event loop — skip the broadcast, just clear local state
+            if phase is not None:
+                keys = [(session_id, phase)]
+            else:
+                keys = self._keys_for_session(session_id)
+            for key in keys:
+                self._results[key] = {
+                    "action": "cancelled",
+                    "payload": {},
+                    "reply": "操作已取消",
+                }
+                self._pending_prompts.pop(key, None)
+                self._pending_steps.pop(key, None)
+                self._pending_contexts.pop(key, None)
+                ev = self._events.get(key)
+                if ev is not None:
+                    ev.set()
+            self._pending_phases.pop(session_id, None)
+            logger.debug("Cancelled confirmation gate for session %s (sync, no broadcast)", session_id)

@@ -176,6 +176,8 @@ class AgentService:
     ) -> None:
         self._pipeline_service = pipeline_service
         self._confirmation_gate = ConfirmationGate()
+        # ── V3: Wire up broadcast callback so ConfirmationGate can send WS events ──
+        self._confirmation_gate.set_broadcast_callback(self.broadcast)
         self._client: anthropic.AsyncAnthropic | None = None
         self._conversations: dict[str, list[dict[str, Any]]] = {}
         self._agent_tasks: dict[str, Any] = {}
@@ -632,7 +634,7 @@ class AgentService:
         """Handle a user:action event (generic UI-triggered action)."""
         if action == "restart":
             self._conversations.pop(session_id, None)
-            self._confirmation_gate.cancel(session_id)
+            await self._confirmation_gate.cancel(session_id)
             from web.backend.main import get_session_service
             try:
                 svc = get_session_service()
@@ -640,7 +642,7 @@ class AgentService:
             except Exception:
                 pass
         elif action == "cancel":
-            self._confirmation_gate.cancel(session_id)
+            await self._confirmation_gate.cancel(session_id)
             self._conversations.pop(session_id, None)
 
     # ── Cleanup ─────────────────────────────────────────────────────────
@@ -652,7 +654,7 @@ class AgentService:
     def cleanup_session(self, session_id: str) -> None:
         """Release all resources for a session."""
         self._conversations.pop(session_id, None)
-        self._confirmation_gate.cancel(session_id)
+        self._confirmation_gate.cancel_sync(session_id)
         self._ws_callbacks.pop(session_id, None)
         self._agent_tasks.pop(session_id, None)
 
