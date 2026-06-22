@@ -1,6 +1,6 @@
 # ViMax Web 开发状态
 
-> 最后更新: 2026-06-22 | 会话: web-interface-v2 | 步骤: ~50 | 花费: 跟踪中
+> 最后更新: 2026-06-23 | 会话: pipeline version | 分支: feature-v3-upgrade | V3 Round 1-3 完成
 
 ## ✅ Done
 
@@ -59,13 +59,18 @@
 
 ## 📋 Next
 
+### /triage 发现 (2026-06-23)
+
+- [P1] **Round 4**: 浏览器端到端验证完整 6 步流程 — 需用户操作
+- [P1] **Round 5**: /reviewer 对抗性审查 — 应在 E2E 通过后执行
+- [P2] **Gap #8**: Artifact diff 追踪 — update_artifact 不生成变更历史
+- [P2] **Gap #9**: Pipeline 内省工具 — Agent 无法查询单步进度
+
+### 通用待办
+
 - [P0] Agent 断线重连后 session 状态完整恢复
 - [P1] 视频渲染进度实时推送优化（大视频场景）
 - [P1] 分镜审阅 UX 完善（拖拽排序、批量确认）
-- [P1] 后端 pipeline 错误信息结构化（区分用户错误 vs 系统错误）
-- [P2] 大 session 加载性能优化（虚拟滚动、懒加载）
-- [P2] AI 对话面板快捷操作扩展（更多上下文场景）
-- [P2] 前端 E2E 测试框架引入（Playwright/Cypress）
 - [P3] 移动端响应式适配
 - [P3] 暗色模式支持
 
