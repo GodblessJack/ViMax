@@ -63,12 +63,16 @@ export default function CreateDramaPage() {
         check()
       })
 
-      // Step 3: start workflow via REST
-      await request('/pipeline/start-workflow', {
-        method: 'POST',
-        body: JSON.stringify({ idea, style: style || 'wuxia', user_requirement: '', session_id: sid }),
+      // Step 3: start workflow via WebSocket (V3 gated — pre_confirm → execute → post_confirm)
+      sendWsMessage({
+        type: 'user:action',
+        action: 'start_workflow',
+        idea,
+        style: style || 'wuxia',
+        user_requirement: '',
+        session_id: sid,
       })
-      logger.userAction('start_workflow', { sessionId: sid })
+      logger.userAction('start_workflow_via_ws', { sessionId: sid })
     } catch (err) {
       logger.error('Failed to start planning', err)
     } finally {

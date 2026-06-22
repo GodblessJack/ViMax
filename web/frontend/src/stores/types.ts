@@ -288,7 +288,7 @@ export type WsClientEvent =
   | { type: 'user:modify'; step: string; changes: Record<string, unknown>; feedback?: string }
   | { type: 'user:regenerate'; step: string; feedback?: string }
   | { type: 'user:navigate'; target_step: string }
-  | { type: 'user:message'; text: string; context?: { current_step?: string; referenced_artifact?: string } }
+  | { type: 'user:message'; message: string; context?: { current_step?: string; referenced_artifact?: string } }
   | { type: 'user:action'; action: string; payload?: unknown }
   | { type: 'ping' }
   // === V3: Pre-exec confirmation events ===

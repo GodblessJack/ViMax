@@ -138,7 +138,7 @@ export function StepActions({ step }: { step: WorkflowStep }) {
         onClick={() => {
           sendWsMessage({
             type: 'user:message',
-            text: `我想讨论一下 ${step.label}...`,
+            message: `我想讨论一下 ${step.label}...`,
             context: { current_step: step.name },
           })
         }}

@@ -272,11 +272,9 @@ class AgentService:
             create_keywords = ["开始创作", "开始规划", "开始生成", "我想创作", "请开始规划",
                               "帮我创作", "创建一个", "生成一个", "拍一个"]
             if any(kw in message for kw in create_keywords):
-                logger.info("Auto-starting pipeline for session %s", session_id)
+                logger.info("Auto-starting V3 gated workflow for session %s", session_id)
                 try:
-                    from web.backend.models.api_models import PipelinePlanRequest
-                    from web.backend.main import get_pipeline_service
-                    psvc = get_pipeline_service()
+                    from web.backend.main import get_session_service
                     # Parse idea/style from message
                     idea = message
                     style = "wuxia"
@@ -291,13 +289,18 @@ class AgentService:
                         if kw in message:
                             style = s
                             break
-                    request = PipelinePlanRequest(
+                    # Ensure session exists
+                    svc = get_session_service()
+                    if svc.get_session(session_id) is None:
+                        svc.create_session(idea=idea, style=style, user_requirement="")
+                    # Use V3 gated workflow (pre_confirm → execute → post_confirm)
+                    # instead of old start_planning() which bypasses confirmation gates
+                    await self.start_workflow(
                         session_id=session_id,
                         idea=idea,
                         style=style,
                         user_requirement="",
                     )
-                    await psvc.start_planning(request)
                     return {"reply": (
                         "🚀 规划已启动！正在分析你的创意并生成故事内容...\n\n"
                         "你可以在左侧工作区实时查看进度：\n"
@@ -305,7 +308,7 @@ class AgentService:
                         "生成过程中如有任何想法，随时告诉我。"
                     )}
                 except Exception as e:
-                    logger.exception("Auto-start pipeline failed for %s", session_id)
+                    logger.exception("Auto-start V3 workflow failed for %s", session_id)
                     # Fall through to LLM chat if pipeline start fails
 
             client = self._get_client()
