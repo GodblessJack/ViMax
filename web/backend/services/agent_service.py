@@ -271,28 +271,46 @@ class AgentService:
                 tool_choice={"type": "auto"},
             )
 
+            # Build assistant message with ALL content blocks (text + tool_use)
+            assistant_blocks: list[dict[str, Any]] = []
+            tool_results: list[dict[str, Any]] = []
             assistant_text = ""
+
             for block in response.content:
                 if block.type == "text":
                     assistant_text += block.text
-                    conversation.append({"role": "assistant", "content": block.text})
+                    assistant_blocks.append({"type": "text", "text": block.text})
                 elif block.type == "tool_use":
-                    # Execute tool and append result
+                    assistant_blocks.append({
+                        "type": "tool_use",
+                        "id": block.id,
+                        "name": block.name,
+                        "input": block.input,
+                    })
+                    # Execute tool
                     tool_result = await self._execute_tool(
                         session_id,
                         block.name,
                         block.input,
                     )
-                    conversation.append({
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": json.dumps(tool_result, ensure_ascii=False),
-                            }
-                        ],
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": json.dumps(tool_result, ensure_ascii=False),
                     })
+
+            # Append assistant message with all blocks (required format for DeepSeek)
+            conversation.append({
+                "role": "assistant",
+                "content": assistant_blocks,
+            })
+
+            # Append tool results as a single user message (if any)
+            if tool_results:
+                conversation.append({
+                    "role": "user",
+                    "content": tool_results,
+                })
 
             return {"reply": assistant_text}
         except Exception as exc:
