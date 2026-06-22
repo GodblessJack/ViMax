@@ -30,6 +30,8 @@ brakes:
 
   # 4. write_branches: 允许写入的 git 分支模式
   write_branches:
+    - "feature-v3-upgrade"
+    - "long-chain"
     - "fix/*"
     - "feat/*"
     - "auto/*"
