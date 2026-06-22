@@ -878,6 +878,7 @@ class AgentService:
                         prompt=f"[{step_meta['label']}] 即将开始执行，是否继续？",
                         timeout=1800.0,
                         step_name=f"{step_name}:before",
+                        phase="before",  # V3: distinguish from post-confirm gate
                     )
                     pre_action = pre_gate.get("action", "")
                     if pre_action == "reject_before":
@@ -1001,6 +1002,7 @@ class AgentService:
                         prompt=f"{step_name} 已完成，请确认",
                         timeout=1800.0,
                         step_name=step_name,
+                        phase="after",  # V3: distinguish from pre-confirm gate (phase="before")
                     )
                     logger.warning("Workflow: GOT confirmation result for step %s: %s", step_name, gate_result.get("action"))
                     action = gate_result.get("action", "")
