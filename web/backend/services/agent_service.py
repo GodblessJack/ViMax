@@ -272,41 +272,51 @@ class AgentService:
             create_keywords = ["开始创作", "开始规划", "开始生成", "我想创作", "请开始规划",
                               "帮我创作", "创建一个", "生成一个", "拍一个"]
             if any(kw in message for kw in create_keywords):
-                logger.info("Auto-starting V3 gated workflow for session %s", session_id)
                 try:
                     from web.backend.main import get_session_service
-                    # Parse idea/style from message
-                    idea = message
-                    style = "wuxia"
-                    # Extract the core idea
-                    for prefix in ["我想创作一个短剧：", "我想创作：", "拍一个", "创作一个"]:
-                        if prefix in message:
-                            idea = message.split(prefix, 1)[1].split("。")[0].strip()
-                            break
-                    # Detect style from message
-                    for kw, s in [("武侠", "wuxia"), ("古风", "ancient"), ("现代", "modern"),
-                                  ("悬疑", "suspense"), ("喜剧", "comedy")]:
-                        if kw in message:
-                            style = s
-                            break
-                    # Ensure session exists
                     svc = get_session_service()
-                    if svc.get_session(session_id) is None:
-                        svc.create_session(idea=idea, style=style, user_requirement="")
-                    # Use V3 gated workflow (pre_confirm → execute → post_confirm)
-                    # instead of old start_planning() which bypasses confirmation gates
-                    await self.start_workflow(
-                        session_id=session_id,
-                        idea=idea,
-                        style=style,
-                        user_requirement="",
-                    )
-                    return {"reply": (
-                        "🚀 规划已启动！正在分析你的创意并生成故事内容...\n\n"
-                        "你可以在左侧工作区实时查看进度：\n"
-                        "1️⃣ 故事构思 → 2️⃣ 角色提取 → 3️⃣ 剧本编写 → 4️⃣ 分镜设计\n\n"
-                        "生成过程中如有任何想法，随时告诉我。"
-                    )}
+                    session = svc.get_session(session_id)
+
+                    # Guard: only auto-start from 'created' stage to prevent
+                    # dual-path race with user:action/start_workflow (ws.py)
+                    if session is not None and session.stage != "created":
+                        logger.info(
+                            "Skipping auto-start for session %s — stage=%s (workflow already active)",
+                            session_id, session.stage,
+                        )
+                        # Fall through to LLM chat — Agent will respond conversationally
+                    else:
+                        logger.info("Auto-starting V3 gated workflow for session %s", session_id)
+                        # Parse idea/style from message
+                        idea = message
+                        style = "wuxia"
+                        # Extract the core idea
+                        for prefix in ["我想创作一个短剧：", "我想创作：", "拍一个", "创作一个"]:
+                            if prefix in message:
+                                idea = message.split(prefix, 1)[1].split("。")[0].strip()
+                                break
+                        # Detect style from message
+                        for kw, s in [("武侠", "wuxia"), ("古风", "ancient"), ("现代", "modern"),
+                                      ("悬疑", "suspense"), ("喜剧", "comedy")]:
+                            if kw in message:
+                                style = s
+                                break
+                        # Ensure session exists
+                        if session is None:
+                            svc.create_session(idea=idea, style=style, user_requirement="")
+                        # Use V3 gated workflow (pre_confirm → execute → post_confirm)
+                        await self.start_workflow(
+                            session_id=session_id,
+                            idea=idea,
+                            style=style,
+                            user_requirement="",
+                        )
+                        return {"reply": (
+                            "🚀 规划已启动！正在分析你的创意并生成故事内容...\n\n"
+                            "你可以在左侧工作区实时查看进度：\n"
+                            "1️⃣ 故事构思 → 2️⃣ 角色提取 → 3️⃣ 剧本编写 → 4️⃣ 分镜设计\n\n"
+                            "生成过程中如有任何想法，随时告诉我。"
+                        )}
                 except Exception as e:
                     logger.exception("Auto-start V3 workflow failed for %s", session_id)
                     # Fall through to LLM chat if pipeline start fails

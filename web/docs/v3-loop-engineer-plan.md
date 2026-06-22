@@ -130,7 +130,7 @@ Round 5: /triage → /reviewer → commit
 
 修复方案:
 1. handleStartPlanning 不再调用 REST /pipeline/start-workflow
-2. 改为通过 WS 发送 user:message (让 Agent 接收消息后走 _run_workflow_steps 步骤流程)
+2. 改为通过 WS 发送 user:action/start_workflow (ws.py 路由到 AgentService.start_workflow)
 3. Agent 在 _run_workflow_steps 中依次: pre_confirm → tool_run_step → pipeline → post_confirm
 4. 保持向后兼容: REST endpoint 保留但仅用于调试/手动触发
 
