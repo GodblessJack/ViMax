@@ -3,6 +3,9 @@ import { Film, Monitor, Smartphone, Layout, Play } from 'lucide-react'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { PRESET_STYLES } from '@/lib/constants'
 
+import { request } from '@/lib/api'
+import { logger } from '@/lib/logger'
+
 const ASPECT_RATIOS = [
   { key: '16:9', label: '横屏 16:9', icon: Monitor, desc: '标准宽屏' },
   { key: '9:16', label: '竖屏 9:16', icon: Smartphone, desc: '手机短视频' },
@@ -19,14 +22,45 @@ export function CreativeSettings() {
   const setStyle = useWorkflowStore((s) => s.setStyle)
   const sendWsMessage = useWorkflowStore((s) => s.sendWsMessage)
   const sessionId = useWorkflowStore((s) => s.sessionId)
+  const setSessionId = useWorkflowStore((s) => s.setSessionId)
+  const setWizardStep = useWorkflowStore((s) => s.setWizardStep)
   const [aspRatio, setAspRatio] = useState('16:9')
   const [localIdea, setLocalIdea] = useState(idea)
+  const [starting, setStarting] = useState(false)
 
   const selectedStyle = PRESET_STYLES.find((s) => s.key === style)
 
-  const handleStartWorkflow = () => {
-    const message = `我想创作一个短剧：${localIdea || idea}。风格：${selectedStyle?.name || style || '武侠'}。画面比例：${aspRatio}。请开始规划。`
-    sendWsMessage({ type: 'user:message', message })
+  const handleStartWorkflow = async () => {
+    if (starting) return
+    setStarting(true)
+    try {
+      // Step 1: create session if needed
+      let sid = sessionId
+      if (!sid) {
+        const ideaText = localIdea || idea || '创作一个短剧'
+        const styleKey = style || 'wuxia'
+        const createResp = await request<{ session_id: string }>(
+          '/sessions',
+          { method: 'POST', body: JSON.stringify({ idea: ideaText, style: styleKey, user_requirement: '' }) },
+        )
+        sid = createResp.session_id
+        setSessionId(sid)
+        setWizardStep(2)
+        logger.info('CreativeSettings: session created', { sessionId: sid })
+      }
+
+      // Step 2: wait briefly for WS connection
+      await new Promise(r => setTimeout(r, 800))
+
+      // Step 3: send message to agent via WS
+      const message = `我想创作一个短剧：${localIdea || idea}。风格：${selectedStyle?.name || style || '武侠'}。画面比例：${aspRatio}。请开始规划。`
+      sendWsMessage({ type: 'user:message', message })
+      logger.userAction('start_workflow_from_creative_settings', { sessionId: sid })
+    } catch (err) {
+      logger.error('CreativeSettings: failed to start workflow', err)
+    } finally {
+      setStarting(false)
+    }
   }
 
   return (
@@ -105,11 +139,11 @@ export function CreativeSettings() {
 
       <button
         onClick={handleStartWorkflow}
-        disabled={!sessionId}
+        disabled={starting}
         className="w-full py-3 px-4 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <Play className="w-4 h-4" />
-        {sessionId ? '开始创作' : '正在连接...'}
+        {starting ? '正在启动...' : '开始创作'}
       </button>
       <p className="text-xs text-muted-foreground text-center">
         💡 也可以直接在右侧 AI 助手中描述你的创意
