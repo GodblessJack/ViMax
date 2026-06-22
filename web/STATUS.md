@@ -37,7 +37,19 @@
 
 ## 🏃 In Progress
 
-_当前无活跃任务_
+### V3 架构升级 (feature-v3-upgrade, committed: 1422fbe)
+
+- [x] **B1 (P0)**: REST start-workflow 绕过 V3 预确认门 — 2026-06-23
+  - CreateDramaPage.tsx → WS `user:action` 替代 REST
+  - agent_service.py → `start_workflow()` 替代 `psvc.start_planning()`
+- [x] **B2 (P2)**: ChatPanel 预确认缺"修改后执行"按钮 — 2026-06-23
+  - AIChatPanel.tsx: 预确认区新增"修改后执行"按钮 + 修改意见输入框
+- [x] **字段名修正**: user:message `text` → `message` — 2026-06-23
+  - types.ts + StepActions.tsx 统一为 `message`
+- [x] **loop.config.yaml**: write_branches 加入 feature-v3-upgrade — 根因修复
+- [ ] **Round 4**: 浏览器端到端验证完整 6 步流程
+- [ ] **Round 5**: /triage → /reviewer → 最终 commit
+- 验证: pytest ✅ (16p), tsc ✅ (0e)
 
 ## 📋 Next
 
