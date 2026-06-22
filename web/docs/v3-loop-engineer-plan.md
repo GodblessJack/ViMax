@@ -38,7 +38,7 @@ git:
 4. architecture-v3-design.md 覆盖率 ≥ 95%                → ✅ P0/P1 全实现
 5. 无 P0/P1 未修复 Bug                                   → ✅ 7/7 resolved
 
-刹车: max_turns=120, budget=$3 | 实际: 13 commits, 14 files
+刹车: max_turns=120, budget=$3 | 实际: 18 commits, 14 files
 ```
 
 ### 每轮子目标（用 /goal 启动，用 /reviewer 收尾）
@@ -59,9 +59,11 @@ Round 4: /goal WS 端到端验证 ✅ — 完整 V3 gated 流程
   └── ✅ step:need_confirm_before (预确认门弹出)
   └── ✅ user:confirm_before → pipeline:status (门解锁，步骤执行)
 
-Round 5: /triage → /reviewer → commit
-  └── 故障分类 → STATUS.md
-  └── 新发现 Bug → LEARNINGS.md
+Round 5: /triage → /reviewer → commit ✅
+  └── ✅ 故障分类 → STATUS.md
+  └── ✅ Mock E2E 死循环 Bug 发现 → MOCK_MODE 回归修复
+  └── ✅ Phase key 冲突修复
+  └── ✅ 架构文档 91% → 100%
 ```
 
 ## 三、每轮操作模板（5 步标准流程）

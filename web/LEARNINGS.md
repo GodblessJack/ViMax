@@ -1,6 +1,6 @@
 # ViMax Web 错误记忆
 
-> 来源：39 轮 bugfix + 3 轮 UX enhancement + LoopEngineer 部署经验 | 最后更新: 2026-06-22
+> 来源：39 轮 bugfix + 3 轮 UX enhancement + LoopEngineer 部署经验 + V3 架构升级 | 最后更新: 2026-06-23
 
 ---
 
@@ -21,6 +21,10 @@
 | P11 | Zustand workspaceHtml no size cap — repeated append causes O(n^2) slowdown + memory leak | Cap at 5MB or limit fragment count | [[dynamic-html-artifacts-implementation]] |
 | P12 | Workflow 用 regex 匹配 BLOCKED/APPROVED 硬阻塞 | 设计审查阶段 regex 匹配到的任何 BLOCKED 都直接 throw，不给 agent 判断严重度的机会 | 用 verdict agent 替换 regex: agent 自判断 P0 致命/HALT vs P1 可推进/PROCEED，记录风险后自动推进 | [[mianLoop初始化]] |
 | P13 | asyncio.Lock 缺位导致 LLM conversation 并发竞态 | handle_message 和 handle_artifact_action 并发修改 _conversations 列表 | 每个 session 分配独立 asyncio.Lock，所有 conversation 变更都走 lock | [[dynamic-html-artifacts-implementation]] |
+| P14 | REST API 与 Agent 步骤流竞态 | CreateDramaPage 调 REST /pipeline/start-workflow 直接启动 pipeline，与 Agent _run_workflow_steps 预确认门形成双路径竞态 | 前端统一通过 WS user:action 触发 Agent，不再直接调 REST | [[docs/v3-loop-engineer-plan]] |
+| P15 | write_branches 白名单缺失导致分支自动切换 | loop.config.yaml write_branches 不含 feature-v3-upgrade，circuit-breaker hook 自动切回 long-chain | 每次创建新分支时更新 loop.config.yaml write_branches 白名单 | [[docs/v3-loop-engineer-plan]] |
+| P16 | ConfirmationGate pre/post 共用 phase key | _run_workflow_steps 中 wait_for_confirmation 未传 phase 参数，pre/post 都默认 phase="after"，导致 gate key 冲突 | 预确认传 phase="before"，后确认传 phase="after" | [[docs/v3-loop-engineer-plan]] |
+| P17 | run_step() 替代 start_planning() 破坏 MOCK_MODE | 独立步骤方法 (run_story_generation 等) 无 MOCK_MODE guard，而 start_planning() 有 | 每个独立步骤方法添加 MOCK_MODE guard + mock 生成逻辑 | [[docs/v3-loop-engineer-plan]] |
 | P14 | Zustand useCallback 闭包捕获 stale state | handleIframeLoad/handleRefresh 引用旧的 workspaceHtml 而非最新值 | 用 `useWorkflowStore.getState()` 在回调内读取最新 state，而非依赖闭包变量 | [[dynamic-html-artifacts-implementation]] |
 | P15 | Loop Engineer 审查引擎无限收敛 | 对抗性审查每轮都发现更深层理论问题，BLOCKER 数不降反升 | 设定收敛准则: (a) 静态全绿 (b) 功能性 BLOCKER=0 (c) 剩余为理论/防御层 → 记录接受风险后标记 DONE | [[dynamic-html-artifacts-implementation]] |
 
@@ -50,6 +54,8 @@
 | G20 | _send_step_html_to_workspace 构建的 HTML 不经 _sanitize_html 直接广播 | 文件内容 (story.txt) 中的用户文本未经 sanitize 嵌入 HTML | [[dynamic-html-artifacts-implementation]] |
 | G21 | pipeline:error (冒号) vs pipeline_error (下划线) — 前端 handler 只匹配下划线版 | 统一使用 pipeline_error (下划线)，与 types.ts 的 WsServerEvent 定义一致 | [[dynamic-html-artifacts-implementation]] |
 | G22 | iframe onError prop 不被 HTML/React 支持 (仅 img/script/link 可用) | 用 timeout + artifact:ready 超时检测替代 onError | [[dynamic-html-artifacts-implementation]] |
+| G23 | ConfirmationGate._pending_phases 只存最新 phase | 预确认 (before) 和后确认 (after) 快速交替时，_pending_phases 被覆盖导致 resume() 路由到错误 gate | resume() 始终传显式 phase 参数，不依赖 _pending_phases 自动检测 | [[docs/v3-loop-engineer-plan]] |
+| G24 | ChatOpenAI 构造时验证 SOCKS 代理 URL | LangChain init_chat_model 在 MOCK_MODE 下仍构造 ChatOpenAI，proxy 验证失败导致 step error | MOCK_MODE guard 放在 _build_chat_model() 调用之前 | [[docs/v3-loop-engineer-plan]] |
 
 ## 🟢 Fixes (已验证的修复配方)
 
