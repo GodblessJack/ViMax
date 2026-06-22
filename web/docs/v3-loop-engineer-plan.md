@@ -187,7 +187,7 @@ B1 修复完成后更新 STATUS.md:
 | 7 | ChatPanel 双向同步 | WorkArea 确认 → ChatPanel disabled + 修改后执行 | ✅ B2 已修 |
 | 8 | MOCK_MODE 保护 | 图片/视频不调阿里 API | ✅ 已实现 |
 | 9 | 6 步完整流程 | WS E2E: create→connect→start_workflow→confirm_before→pipeline:status | ✅ 程序化验证通过 |
-| 10 | 设计文档覆盖率 | 代码 vs architecture-v3-design.md | 91% |
+| 10 | 设计文档覆盖率 | 代码 vs architecture-v3-design.md, P0/P1 全实现 + 状态标注 | ✅ ≈95% |
 
 ## 九、执行顺序
 

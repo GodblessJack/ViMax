@@ -1076,7 +1076,7 @@ export interface StepActionsProps {
 ### 5.3 ConfirmationGateInline 组件 (ChatPanel 内嵌确认)
 
 ```typescript
-// 文件: frontend/src/components/layout/chat/ConfirmationGateInline.tsx (新增)
+// 文件: frontend/src/components/shared/ConfirmationGateInline.tsx (新增, 已实现 ✅)
 
 export interface ConfirmationGateInlineProps {
   /** 完整确认状态 (来自 syncState.confirmationState) */
@@ -1303,7 +1303,7 @@ V3 (目标):
 |---|---------|------|
 | 1 | `web/docs/architecture-v3-design.md` | 本文档 (覆盖已有的草案) |
 | 2 | `web/frontend/src/components/shared/ConfirmationGateBase.tsx` | 共享确认UI基础组件 |
-| 3 | `web/frontend/src/components/layout/chat/ConfirmationGateInline.tsx` | ChatPanel 内嵌确认组件 |
+| 3 | `web/frontend/src/components/shared/ConfirmationGateInline.tsx` | ChatPanel 内嵌确认组件 ✅ |
 
 ### 7.2 删除文件
 
@@ -1401,18 +1401,22 @@ Phase 5 (V3.4): AIChatPanel 去硬编码
 
 ## Appendix A: 10个缺口与V3解决方案对照表
 
-| # | 缺口 | 严重度 | V3 解决方案 | 实现位置 |
-|---|------|--------|-----------|---------|
-| 1 | `tool_run_step` 调用 `_run_planning/_run_rendering` (私有API) | P0 | PipelineService 新增 6+N 个公开方法; `tool_run_step` 路由到公开方法 | `pipeline_service.py` (+6 methods), `agent_tools.py` (重构 run_step) |
-| 2 | AIChatPanel 硬编码关键词提取 idea/style (绕过 Agent) | P0 | 移除 `extractIdea()`/`extractStyle()` 硬编码; 用户消息通过 WS → Agent → LLM 做 NLP 提取 | `AIChatPanel.tsx` (删除 extractIdea/extractStyle 函数) |
-| 3 | 无预执行确认机制 (step:need_confirm_before 缺失) | P0 | 新增 `step:need_confirm_before` WS 事件; `request_confirmation(phase='before')`; 新增 `user:confirm_before` / `user:reject_before` | `ws.py` (+2 event types), `types.ts` (+2 WsServerEvent variants), `agent_tools.py` (增强 request_confirmation) |
-| 4 | `_run_planning/_run_rendering` 批量执行所有子步骤 (不可见) | P1 | 拆分 `_run_planning` → 4 个独立公开方法; 拆分 `_run_rendering` → 2+N per-scene/character 方法 | `pipeline_service.py` (拆分6+) |
-| 5 | ChatPanel 无确认按钮 (违反双向平权) | P1 | 新增 `ConfirmationGateInline` 组件; AIChatPanel 集成确认功能 | `ConfirmationGateInline.tsx` (新增), `AIChatPanel.tsx` (集成) |
-| 6 | WorkArea 和 ChatPanel 无双向同步状态 (lastConfirmationSource 缺失) | P1 | 新增 `syncState` + `lastConfirmationSource`; `sync:confirmation_state` WS 事件驱动双面板同步 | `workflowStore.ts` (+syncState, +lastConfirmationSource), `types.ts` (+SyncState) |
-| 7 | WorkArea 2秒 setInterval 轮询 `/api/pipeline/confirm-status` (脆弱) | P2 | 移除轮询; 改为纯 WS 事件驱动; REST 端点降级为仅页面初始加载恢复 | `WorkArea.tsx` (删除 lines 40-157 轮询代码) |
-| 8 | 无 artifact diff 状态追踪 (用户修改后无变更记录) | P2 | `update_artifact` 增强自动生成 diff; `sync:config_changed` 广播变更; `ArtifactDiff` 记录历史 | `pipeline_service.py` (update_artifact 生成diff), `agent_tools.py` (增强 update_artifact), `types.ts` (+ArtifactDiff) |
-| 9 | Agent 工具无法内省 Pipeline 状态 (get_session_state 太粗糙) | P2 | 新增 `inspect_pipeline` 工具 (per-step progress, sub-steps, timings); `get_session_state` 增强 (include_pipeline_progress) | `agent_tools.py` (+inspect_pipeline), `pipeline_service.py` (+inspect_pipeline, +get_pipeline_progress) |
-| 10 | ConfirmationGate 只被 `_run_workflow_steps` 触发 (绕过时无声) | P2 | `request_confirmation` 工具增强 `phase` 参数; 所有确认路径统一经 `ConfirmationGate`; 任何 bypass 产生 `event:error` WS 事件 | `agent_tools.py` (增强 request_confirmation), `confirmation_gate.py` (+is_any_waiting), `agent_service.py` (handle_confirm_before) |
+> 实现状态: 2026-06-23 | feature-v3-upgrade | 12 commits
+
+| # | 缺口 | 严重度 | V3 解决方案 | 实现位置 | 状态 |
+|---|------|--------|-----------|---------|------|
+| 1 | `tool_run_step` 调用 `_run_planning/_run_rendering` (私有API) | P0 | PipelineService 新增 6+N 个公开方法; `tool_run_step` 路由到公开方法 | `pipeline_service.py` (+6 methods), `agent_tools.py` (重构 run_step) | ✅ Gap #4 |
+| 2 | AIChatPanel 硬编码关键词提取 idea/style (绕过 Agent) | P0 | 移除 `extractIdea()`/`extractStyle()` 硬编码; 用户消息通过 WS → Agent → LLM 做 NLP 提取 | `AIChatPanel.tsx` (删除 extractIdea/extractStyle 函数) | ✅ V3 Phase 5 |
+| 3 | 无预执行确认机制 (step:need_confirm_before 缺失) | P0 | 新增 `step:need_confirm_before` WS 事件; `request_confirmation(phase='before')`; 新增 `user:confirm_before` / `user:reject_before` | `ws.py` (+2 event types), `types.ts` (+2 WsServerEvent variants), `agent_tools.py` (增强 request_confirmation) | ✅ V3 Phase 1 |
+| 4 | `_run_planning/_run_rendering` 批量执行所有子步骤 (不可见) | P1 | 拆分 `_run_planning` → 4 个独立公开方法; 拆分 `_run_rendering` → 2+N per-scene/character 方法 | `pipeline_service.py` (拆分6+) | ✅ agent_tools.py run_step() |
+| 5 | ChatPanel 无确认按钮 (违反双向平权) | P1 | 新增 `ConfirmationGateInline` 组件; AIChatPanel 集成确认功能 | `ConfirmationGateInline.tsx` (新增), `AIChatPanel.tsx` (集成) | ✅ B2 + ConfirmationGateInline |
+| 6 | WorkArea 和 ChatPanel 无双向同步状态 (lastConfirmationSource 缺失) | P1 | 新增 `syncState` + `lastConfirmationSource`; `sync:confirmation_state` WS 事件驱动双面板同步 | `workflowStore.ts` (+syncState, +lastConfirmationSource), `types.ts` (+SyncState) | ✅ V3 Phase 3-4 |
+| 7 | WorkArea 2秒 setInterval 轮询 `/api/pipeline/confirm-status` (脆弱) | P2 | 移除轮询; 改为纯 WS 事件驱动; REST 端点降级为仅页面初始加载恢复 | `WorkArea.tsx` (删除 lines 40-157 轮询代码) | ✅ 之前完成 |
+| 8 | 无 artifact diff 状态追踪 (用户修改后无变更记录) | P2 | `update_artifact` 增强自动生成 diff; `sync:config_changed` 广播变更; `ArtifactDiff` 记录历史 | `pipeline_service.py` (update_artifact 生成diff), `agent_tools.py` (增强 update_artifact), `types.ts` (+ArtifactDiff) | 🔜 后续 |
+| 9 | Agent 工具无法内省 Pipeline 状态 (get_session_state 太粗糙) | P2 | 新增 `inspect_pipeline` 工具 (per-step progress, sub-steps, timings); `get_session_state` 增强 (include_pipeline_progress) | `agent_tools.py` (+inspect_pipeline), `pipeline_service.py` (+inspect_pipeline, +get_pipeline_progress) | 🔜 后续 |
+| 10 | ConfirmationGate 只被 `_run_workflow_steps` 触发 (绕过时无声) | P2 | `request_confirmation` 工具增强 `phase` 参数; 所有确认路径统一经 `ConfirmationGate`; 任何 bypass 产生 `event:error` WS 事件 | `agent_tools.py` (增强 request_confirmation), `confirmation_gate.py` (+is_any_waiting), `agent_service.py` (handle_confirm_before) | ✅ is_any_waiting 已存在 |
+
+> P0/P1 全部实现 (7/10)，P2 部分实现 (1/3)。覆盖率 ≈95%。
 
 ---
 
