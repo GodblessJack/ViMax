@@ -247,6 +247,29 @@ class PipelineService:
         root = str(self._root)
         ds_key = os.environ.get("DASHSCOPE_API_KEY", "")
 
+        # ── V3: Use DeepSeek via OpenAI-compatible API ──
+        # DeepSeek has both Anthropic (/anthropic) and OpenAI (/v1) endpoints.
+        # LangChain agents expect OpenAI-format responses, so we use the /v1
+        # endpoint with the same auth token configured in ANTHROPIC_AUTH_TOKEN.
+        deepseek_key = os.environ.get("ANTHROPIC_AUTH_TOKEN", "") or os.environ.get("ANTHROPIC_API_KEY", "")
+        deepseek_model = os.environ.get("ANTHROPIC_MODEL", "deepseek-v4-pro[1m]")
+        if deepseek_key:
+            # Map Anthropic model name to DeepSeek OpenAI-compatible model name.
+            # Anthropic endpoint: deepseek-v4-pro[1m] → OpenAI endpoint: deepseek-v4-pro
+            model = deepseek_model
+            model = model.replace("[1m]", "").strip()
+            if "deepseek" not in model.lower():
+                model = "deepseek-chat"
+            return init_chat_model(
+                model=model,
+                model_provider="openai",
+                api_key=deepseek_key,
+                base_url="https://api.deepseek.com/v1",
+                timeout=300,
+                max_retries=0,
+                max_completion_tokens=4096,
+            )
+
         # Rendering needs a vision-capable model (ReferenceImageSelector sends image_url)
         if multimodal and ds_key:
             return init_chat_model(
