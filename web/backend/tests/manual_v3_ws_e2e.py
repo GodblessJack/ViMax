@@ -89,15 +89,31 @@ async def test_v3_ws_connect_and_start_workflow():
                     if evt.get("type") == "step:need_confirm_before":
                         # Found pre-confirmation gate!
                         step_name = evt.get("step", "")
+                        print(f"  ✅ step:need_confirm_before (step={step_name})")
                         await ws.send(json.dumps({
                             "type": "user:confirm_before",
                             "step": step_name,
                         }))
-                        ack_raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
-                        ack = json.loads(ack_raw)
-                        print(f"  Confirm response: type={ack.get('type')}")
-                        assert ack.get("type") in ("agent:confirm_ack", "event:ack", "event:error"), \
-                            f"Unexpected response: {ack.get('type')}"
+                        # After confirm_before, the gate resumes and step
+                        # execution begins. Events may arrive in any order:
+                        # pipeline:status, step:running, agent:confirm_ack.
+                        # Any of these prove the gate unlocked successfully.
+                        gate_unlocked = False
+                        for _ in range(5):
+                            ack_raw = await asyncio.wait_for(ws.recv(), timeout=15.0)
+                            ack = json.loads(ack_raw)
+                            events.append(ack.get("type"))
+                            print(f"  Post-confirm event: {ack.get('type')}")
+                            if ack.get("type") in (
+                                "agent:confirm_ack",     # ws.py response
+                                "pipeline:status",       # step execution started
+                                "step:running",          # step running broadcast
+                                "step:completed",        # step finished
+                            ):
+                                gate_unlocked = True
+                                break
+                        assert gate_unlocked, \
+                            f"Gate did not unlock after confirm_before. Events: {events}"
                         break
             except asyncio.TimeoutError:
                 pass  # LLM may not be available in CI

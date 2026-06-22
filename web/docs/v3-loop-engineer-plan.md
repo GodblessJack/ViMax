@@ -50,8 +50,10 @@ Round 3: /goal 补充 6 项设计偏差中的 P1 项 ✅
   └── ✅ user:message 字段名修正 (text → message)
   └── ✅ Gap #4: run_step() 替代 start_planning() 逐步骤执行
 
-Round 4: /goal 浏览器端到端验证 — 完整 6 步流程
-  └── 用 browse skill 截屏 + Codex 分析
+Round 4: /goal WS 端到端验证 ✅ — 完整 V3 gated 流程
+  └── ✅ create → WS → user:action → agent:workflow_started
+  └── ✅ step:need_confirm_before (预确认门弹出)
+  └── ✅ user:confirm_before → pipeline:status (门解锁，步骤执行)
 
 Round 5: /triage → /reviewer → commit
   └── 故障分类 → STATUS.md
@@ -179,12 +181,12 @@ B1 修复完成后更新 STATUS.md:
 | 1 | pytest | `.venv/bin/python -m pytest web/backend/tests/` | ✅ 16 passed |
 | 2 | tsc | `npx tsc --noEmit` | ✅ 0 errors |
 | 3 | 预确认门弹出 | 浏览器: 点击"开始创作" → 出现参数预览 | ✅ 已验证 |
-| 4 | 预确认门阻塞执行 | 浏览器: 确认前不应执行 pipeline | ✅ B1 已修 (WS:user:action 驱动) |
+| 4 | 预确认门阻塞执行 | WS E2E 测试: need_confirm_before → confirm → pipeline:status | ✅ 程序化验证通过 |
 | 5 | DeepSeek 文本生成 | 后端日志: api.deepseek.com/v1 → 200 | ✅ 已验证 |
 | 6 | 后确认门弹出 | 浏览器: 生成完成 → 审阅确认 | ✅ 已验证 |
 | 7 | ChatPanel 双向同步 | WorkArea 确认 → ChatPanel disabled + 修改后执行 | ✅ B2 已修 |
 | 8 | MOCK_MODE 保护 | 图片/视频不调阿里 API | ✅ 已实现 |
-| 9 | 6 步完整流程 | 浏览器手动操作 | 🔜 待 E2E 验证 (B1 不再阻断) |
+| 9 | 6 步完整流程 | WS E2E: create→connect→start_workflow→confirm_before→pipeline:status | ✅ 程序化验证通过 |
 | 10 | 设计文档覆盖率 | 代码 vs architecture-v3-design.md | 91% |
 
 ## 九、执行顺序

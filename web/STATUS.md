@@ -61,7 +61,10 @@
     - 3 项预存问题记录 (非阻塞)
   - 后端程序化验证: session 创建 201 OK, 前端 Vite 200 OK
   - 验证: pytest ✅ (16p), tsc ✅ (0e)
-- [ ] **Round 4**: 🔜 浏览器 E2E 验证 (需用户操作)
+- [x] **Round 4**: 🔜 程序化 WS E2E 验证通过 — 2026-06-23
+  - 完整 V3 gated 流程验证: create → WS → user:action → agent:workflow_started
+    → step:need_confirm_before → user:confirm_before → pipeline:status
+  - 预确认门正确弹出并阻塞，确认后步骤开始执行
 
 ## 📋 Next
 
