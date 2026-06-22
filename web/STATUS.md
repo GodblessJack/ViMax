@@ -46,6 +46,9 @@
   - AIChatPanel.tsx: 预确认区新增"修改后执行"按钮 + 修改意见输入框
 - [x] **字段名修正**: user:message `text` → `message` — 2026-06-23
   - types.ts + StepActions.tsx 统一为 `message`
+- [x] **ConfirmationGateInline.tsx**: 预确认组件提取 — 2026-06-23
+  - 从 AIChatPanel 提取为独立可复用组件
+  - 含确认/修改后执行/取消按钮 + 修改输入区
 - [x] **loop.config.yaml**: write_branches 加入 feature-v3-upgrade — 根因修复
 - [ ] **Round 4**: 浏览器端到端验证完整 6 步流程
 - [ ] **Round 5**: /triage → /reviewer → 最终 commit
