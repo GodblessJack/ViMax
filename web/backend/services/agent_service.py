@@ -197,12 +197,17 @@ class AgentService:
             logger.warning("anthropic package not installed — Agent chat unavailable")
             return None
 
-        from web.backend.config import backend_config
-        from agent_runtime.config import llm_api_key, llm_base_url
+        # V3: Use ANTHROPIC_* env vars (DeepSeek relay) — the canonical config for this project
+        # Falls back to VIMAX_LLM_* / agent_runtime config / DashScope
+        api_key = os.environ.get("ANTHROPIC_AUTH_TOKEN", "") or os.environ.get("ANTHROPIC_API_KEY", "")
+        base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
 
-        root = str(backend_config.vi_max_root)
-        api_key = llm_api_key(root)
-        base_url = llm_base_url(root)
+        if not api_key or not base_url:
+            from web.backend.config import backend_config
+            from agent_runtime.config import llm_api_key, llm_base_url
+            root = str(backend_config.vi_max_root)
+            api_key = api_key or llm_api_key(root)
+            base_url = base_url or llm_base_url(root)
 
         # DashScope fallback
         ds_key = os.environ.get("DASHSCOPE_API_KEY", "")
@@ -258,7 +263,7 @@ class AgentService:
             conversation.append({"role": "user", "content": message})
 
             response = await client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=os.environ.get("ANTHROPIC_MODEL", "deepseek-v4-pro[1m]"),
                 max_tokens=4096,
                 system=AGENT_SYSTEM_PROMPT,
                 messages=conversation,
