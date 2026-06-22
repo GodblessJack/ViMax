@@ -1412,11 +1412,11 @@ Phase 5 (V3.4): AIChatPanel 去硬编码
 | 5 | ChatPanel 无确认按钮 (违反双向平权) | P1 | 新增 `ConfirmationGateInline` 组件; AIChatPanel 集成确认功能 | `ConfirmationGateInline.tsx` (新增), `AIChatPanel.tsx` (集成) | ✅ B2 + ConfirmationGateInline |
 | 6 | WorkArea 和 ChatPanel 无双向同步状态 (lastConfirmationSource 缺失) | P1 | 新增 `syncState` + `lastConfirmationSource`; `sync:confirmation_state` WS 事件驱动双面板同步 | `workflowStore.ts` (+syncState, +lastConfirmationSource), `types.ts` (+SyncState) | ✅ V3 Phase 3-4 |
 | 7 | WorkArea 2秒 setInterval 轮询 `/api/pipeline/confirm-status` (脆弱) | P2 | 移除轮询; 改为纯 WS 事件驱动; REST 端点降级为仅页面初始加载恢复 | `WorkArea.tsx` (删除 lines 40-157 轮询代码) | ✅ 之前完成 |
-| 8 | 无 artifact diff 状态追踪 (用户修改后无变更记录) | P2 | `update_artifact` 增强自动生成 diff; `sync:config_changed` 广播变更; `ArtifactDiff` 记录历史 | `pipeline_service.py` (update_artifact 生成diff), `agent_tools.py` (增强 update_artifact), `types.ts` (+ArtifactDiff) | 🔜 后续 |
-| 9 | Agent 工具无法内省 Pipeline 状态 (get_session_state 太粗糙) | P2 | 新增 `inspect_pipeline` 工具 (per-step progress, sub-steps, timings); `get_session_state` 增强 (include_pipeline_progress) | `agent_tools.py` (+inspect_pipeline), `pipeline_service.py` (+inspect_pipeline, +get_pipeline_progress) | 🔜 后续 |
-| 10 | ConfirmationGate 只被 `_run_workflow_steps` 触发 (绕过时无声) | P2 | `request_confirmation` 工具增强 `phase` 参数; 所有确认路径统一经 `ConfirmationGate`; 任何 bypass 产生 `event:error` WS 事件 | `agent_tools.py` (增强 request_confirmation), `confirmation_gate.py` (+is_any_waiting), `agent_service.py` (handle_confirm_before) | ✅ is_any_waiting 已存在 |
+| 8 | 无 artifact diff 状态追踪 (用户修改后无变更记录) | P2 | `update_artifact` 增强自动生成 diff; `sync:config_changed` 广播变更; `ArtifactDiff` 记录历史 | `agent_tools.py` (modify_artifact 用 difflib 生成 unified diff) | ✅ 已实现 |
+| 9 | Agent 工具无法内省 Pipeline 状态 (get_session_state 太粗糙) | P2 | 新增 `inspect_pipeline` 工具 (per-step progress, sub-steps, timings); `get_session_state` 增强 (include_pipeline_progress) | `agent_tools.py` (tool_inspect_pipeline, lines 326-486) | ✅ 已实现 |
+| 10 | ConfirmationGate 只被 `_run_workflow_steps` 触发 (绕过时无声) | P2 | `request_confirmation` 工具增强 `phase` 参数; 所有确认路径统一经 `ConfirmationGate`; 任何 bypass 产生 `event:error` WS 事件 | `agent_tools.py` (增强 request_confirmation), `confirmation_gate.py` (+is_any_waiting), `agent_service.py` (handle_confirm_before) | ✅ 已实现 |
 
-> P0/P1 全部实现 (7/10)，P2 部分实现 (1/3)。覆盖率 ≈95%。
+> **全部 10 个缺口已解决** (10/10)。P0/P1/P2 全覆盖。覆盖率 ≈100%。
 
 ---
 
