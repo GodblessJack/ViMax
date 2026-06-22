@@ -1156,6 +1156,9 @@ class PipelineService:
         Returns:
             {"status": "ok", "artifacts": ["idea2video/scene_N/storyboard.json"], "scene_index": N}
         """
+        if MOCK_MODE:
+            return await self._mock_storyboard_scene(session_id, scene_index)
+
         working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
 
         # Load scene script for the requested index
