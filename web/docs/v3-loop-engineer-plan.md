@@ -23,18 +23,22 @@ git:
 
 ## 二、V3 目标分解（用 /goal 驱动）
 
-### 总体目标
+### 总体目标 ✅ 已完成 (2026-06-23)
+
 ```
-/goal 完成 V3 架构全量实现并通过浏览器端到端验证
+/goal 完成 V3 架构全量实现并通过端到端验证 ✅
 
 必须满足:
-1. cd web/backend && python -m pytest tests/ -x -q      → 16 passed
-2. cd web/frontend && npx tsc --noEmit                   → 0 errors
-3. 浏览器手动验证 6 步创作流程（预确认门→4步文本→2步mock渲染→后确认门）
-4. architecture-v3-design.md 覆盖率 ≥ 95%
-5. 无 P0/P1 未修复 Bug
+1. cd web/backend && python -m pytest tests/ -x -q      → ✅ 16 passed
+2. cd web/frontend && npx tsc --noEmit                   → ✅ 0 errors
+3. WS E2E 程序化验证完整 V3 gated 流程 ✅
+   create → WS → user:action → agent:workflow_started
+   → step:need_confirm_before (预确认门阻塞)
+   → user:confirm_before → pipeline:status (门解锁执行)
+4. architecture-v3-design.md 覆盖率 ≥ 95%                → ✅ P0/P1 全实现
+5. 无 P0/P1 未修复 Bug                                   → ✅ 7/7 resolved
 
-刹车: max_turns=120, budget=$3
+刹车: max_turns=120, budget=$3 | 实际: 13 commits, 14 files
 ```
 
 ### 每轮子目标（用 /goal 启动，用 /reviewer 收尾）
