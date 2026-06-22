@@ -735,6 +735,89 @@ class PipelineService:
 
         logger.info("Mock planning data generated successfully for session %s", session_id)
 
+    async def _mock_story_generation(
+        self, session_id: str, idea: str, style: str,
+    ) -> dict[str, Any]:
+        """Generate mock story artifact without LLM call.
+
+        Used by run_story_generation when MOCK_MODE is enabled.
+        """
+        import json as json_mod
+
+        working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
+        os.makedirs(working_dir, exist_ok=True)
+
+        idea_text = idea or "一个关于江湖恩怨与侠义精神的传奇故事"
+        story = f"""第一章 月下孤影
+
+夜，深沉如墨。一轮冷月高悬天际。
+
+少年名叫{idea_text[:20]}，自幼在师父门下习武。今夜，是他首次独自下山的前夕。
+
+「明日下山，切记：江湖险恶，人心叵测。」师父的话语犹在耳畔。
+
+第二章 城中风波
+
+翌日清晨，少年踏入了繁华的洛水城。正行间，忽听得前方传来打斗之声。
+
+少年心中一凛，右手已按在了剑柄之上。「住手！」他一声断喝，人随声至。
+
+第三章 宿命之约
+
+那绿衫女子名叫柳如烟，乃是江南柳家的遗孤。"""
+
+        story_path = Path(working_dir) / "story.txt"
+        story_path.write_text(story, encoding="utf-8")
+
+        await self._broadcast_ws(session_id, {
+            "type": "step:running",
+            "step": "story_generation",
+            "progress_percent": 100,
+            "progress_message": "故事生成完成 (mock)",
+        })
+        await self._broadcast_ws(session_id, {
+            "type": "artifact_ready",
+            "session_id": session_id,
+            "artifact": "idea2video/story.txt",
+        })
+
+        return {
+            "status": "ok",
+            "artifacts": ["idea2video/story.txt"],
+            "story": story[:500],
+            "mock": True,
+        }
+
+    async def _mock_character_extraction(self, session_id: str) -> dict[str, Any]:
+        import json as json_mod
+        working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
+        os.makedirs(working_dir, exist_ok=True)
+        chars = [
+            {"name": "白衣少年", "role": "主角", "description": "武艺高强的年轻侠客，身世成谜"},
+            {"name": "柳如烟", "role": "女主角", "description": "江南柳家遗孤，聪慧过人"},
+            {"name": "铁剑掌门", "role": "反派", "description": "铁剑门掌门，武功深不可测"},
+        ]
+        (Path(working_dir) / "characters.json").write_text(json_mod.dumps(chars, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"status": "ok", "artifacts": ["idea2video/characters.json"], "characters": chars, "mock": True}
+
+    async def _mock_script_writing(self, session_id: str) -> dict[str, Any]:
+        import json as json_mod
+        working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
+        os.makedirs(working_dir, exist_ok=True)
+        script = {"scenes": [{"index": 0, "title": "月下孤影", "duration": 30, "shots": 3}]}
+        (Path(working_dir) / "script.json").write_text(json_mod.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"status": "ok", "artifacts": ["idea2video/script.json"], "script": script, "mock": True}
+
+    async def _mock_storyboard_scene(self, session_id: str, scene_index: int = 0) -> dict[str, Any]:
+        import json as json_mod
+        working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
+        os.makedirs(working_dir, exist_ok=True)
+        scene_dir = Path(working_dir) / f"scene_{scene_index}"
+        scene_dir.mkdir(exist_ok=True)
+        storyboard = {"scene_index": scene_index, "shots": [{"index": 0, "description": "全景镜头，月光下的竹林"}]}
+        (scene_dir / "storyboard.json").write_text(json_mod.dumps(storyboard, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"status": "ok", "artifacts": [f"idea2video/scene_{scene_index}/storyboard.json"], "storyboard": storyboard, "mock": True}
+
     # ── Public API: start rendering ───────────────────────────────────
 
     async def start_rendering(
@@ -875,6 +958,10 @@ class PipelineService:
         Returns:
             {"status": "ok", "artifacts": ["idea2video/story.txt"], "story": "..."}
         """
+        # ── MOCK_MODE guard: generate mock data without LLM ──────────
+        if MOCK_MODE:
+            return await self._mock_story_generation(session_id, idea, style)
+
         chat_model = self._build_chat_model()
         dummy = _UnavailableGenerator()
         working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
@@ -937,6 +1024,8 @@ class PipelineService:
         Returns:
             {"status": "ok", "artifacts": ["idea2video/characters.json"], "characters": [...]}
         """
+        if MOCK_MODE:
+            return await self._mock_character_extraction(session_id)
         working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
         story_path = os.path.join(working_dir, "story.txt")
         if not os.path.exists(story_path):
@@ -945,6 +1034,9 @@ class PipelineService:
             )
         with open(story_path, "r", encoding="utf-8") as f:
             story = f.read()
+
+        if MOCK_MODE:
+            return await self._mock_script_writing(session_id)
 
         chat_model = self._build_chat_model()
         dummy = _UnavailableGenerator()
@@ -1003,6 +1095,9 @@ class PipelineService:
             )
         with open(story_path, "r", encoding="utf-8") as f:
             story = f.read()
+
+        if MOCK_MODE:
+            return await self._mock_script_writing(session_id)
 
         chat_model = self._build_chat_model()
         dummy = _UnavailableGenerator()
