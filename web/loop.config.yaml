@@ -1,0 +1,65 @@
+# ── ViMax Web Loop 刹车配置 ───────────────────────────────────────────────
+# 6 项安全机制，防止 runaway loop / 预算超支 / 静默死亡
+# 来源：LoopEngineer shmidtqq 方法论
+# 环境：DeepSeek v4-pro[1m]（定价约为 Claude Opus 的 1/10-1/50）
+# ═══════════════════════════════════════════════════════════════════════════
+
+brakes:
+  # 1. max_turns: 单次 session 最大工具调用步数
+  # ViMax 复杂功能（Dynamic HTML Artifacts 等）单次 40-60 步，留余量
+  max_turns: 120
+
+  # 2. max_budget_usd: 单次 session 最大花费上限
+  # DeepSeek 极便宜，$3 可支撑大量工作；设低防 runaway
+  max_budget_usd: 3
+
+  # 3. scope: 允许写入的文件路径范围
+  scope:
+    - web/backend/
+    - web/backend/tests/
+    - web/frontend/src/
+    - web/frontend/public/
+    - web/frontend/index.html
+    - web/frontend/package.json
+    - web/frontend/vite.config.ts
+    - web/frontend/tsconfig.json
+    - web/frontend/tsconfig.app.json
+    - web/frontend/tsconfig.node.json
+    - web/frontend/eslint.config.js
+    - web/docs/
+
+  # 4. write_branches: 允许写入的 git 分支模式
+  write_branches:
+    - "fix/*"
+    - "feat/*"
+    - "auto/*"
+    - "enhance/*"
+
+  # 5. circuit_breaker: 同一 tool+input 连续重复次数上限（死循环检测）
+  # 调到 5 以允许合法批量操作（如批量 rename import）
+  circuit_breaker: 5
+
+  # 6. heartbeat: STATUS.md 最大未更新时长（分钟），超时判定静默死亡
+  # 复杂 bug 可能调试 3-4 小时，设为 240 分钟
+  heartbeat_file: STATUS.md
+  heartbeat_max_age_min: 240
+
+# ── 通知（刹车触发时） ──
+notifications:
+  on_breach: slack
+  slack_webhook_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+
+# ── 预算策略 ──
+# 注意：当前环境使用 DeepSeek，无 haiku/opus 模型
+budget:
+  planning_model: deepseek-v4-pro[1m]
+  execution_model: deepseek-v4-pro[1m]
+  caching_enabled: true
+  delegate_search: true
+
+# ── Sub-agent 配置 ──
+sub_agents:
+  reviewer:
+    model: deepseek-v4-pro[1m]
+    reasoning: high
+    adversarial: true

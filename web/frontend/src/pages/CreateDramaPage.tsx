@@ -92,7 +92,7 @@ export default function CreateDramaPage() {
       logger.info('Session restored', { sessionId: sid, stage: detail.stage })
       useWorkflowStore.getState().sendWsMessage({
         type: 'user:message',
-        text: '/resume',
+        message: '/resume',
         context: { current_step: detail.stage },
       })
     }).catch((err) => {
@@ -122,7 +122,7 @@ export default function CreateDramaPage() {
           totalShots={scenes.reduce((sum, s) => sum + (s.shot_count || 0), 0)}
           storeChatMessages={chatMessages}
           storeAgentSuggestions={agentSuggestions}
-          onWSSendMessage={(text) => sendWsMessage({ type: 'user:message', text })}
+          onWSSendMessage={(text) => sendWsMessage({ type: 'user:message', message: text })}
         />
       </div>
     </div>

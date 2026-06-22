@@ -1,0 +1,214 @@
+{
+  "main": {
+    "id": "ee6a98ae47e30af9",
+    "type": "split",
+    "children": [
+      {
+        "id": "1e0fb1c09f515849",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "ab4e9cfbca0ee659",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "STATUS.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "STATUS"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "ebe0660e73ed3f3a",
+    "type": "split",
+    "children": [
+      {
+        "id": "77ab6552b8deff53",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "1b3b23d96c8a0c9b",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "6de0f4cf7acf1dba",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "5ec4b5d90140db9d",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "a07d2fa61dcb003f",
+    "type": "split",
+    "children": [
+      {
+        "id": "4bba17620261728f",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "74beb5e696efe8cc",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "STATUS.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for STATUS"
+            }
+          },
+          {
+            "id": "c36ac7d1b02d06e6",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "STATUS.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from STATUS"
+            }
+          },
+          {
+            "id": "96da14558555d898",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "44dcf95939c07192",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "4e8880ce3598ac8c",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "STATUS.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of STATUS"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "ab4e9cfbca0ee659",
+  "lastOpenFiles": [
+    "frontend/src/pages/CreateDramaPage.tsx.tmp.2779504.7a852bb05b58",
+    "frontend/src/components/workarea/CreativeSettings.tsx.tmp.2779504.adc358173a33",
+    "frontend/src/components/workarea/CreativeSettings.tsx.tmp.2779504.28f8c566c6b0",
+    "frontend/src/components/workarea/CreativeSettings.tsx.tmp.2779504.f329cdc7e8ab",
+    "frontend/src/pages/CreateDramaPage.tsx.tmp.2779504.95066dd62c00",
+    "LEARNINGS.md.tmp.2885171.5340f647a214",
+    "LEARNINGS.md.tmp.2885171.ce5c7137ab7b",
+    "LEARNINGS.md.tmp.2885171.db7a96269fb0",
+    "LEARNINGS.md.tmp.2885171.83764e82681d",
+    "CLAUDE.md.tmp.3106466.712610d634f4",
+    "LEARNINGS.md.tmp.3106466.c592a4218b9d",
+    "frontend/dist/screenshots/e2e-31-clean-console-test.png",
+    "frontend/dist/screenshots/e2e-30-step6-mock-video.png",
+    "frontend/dist/screenshots/e2e-29-step5-mock-portrait.png",
+    "frontend/dist/screenshots/e2e-28-step6-video.png",
+    "frontend/dist/screenshots/e2e-27-step5-portrait.png",
+    "frontend/dist/screenshots/e2e-26-full-flow-s1.png",
+    "frontend/dist/screenshots/e2e-25-works-page.png",
+    "frontend/dist/screenshots/e2e-24-storyboard-fixed.png",
+    "frontend/dist/screenshots/e2e-23-step4-storyboard.png",
+    "frontend/dist/screenshots/e2e-22-step2-after-confirm.png",
+    "docs/architecture-v3-design.md",
+    "LOOPENGINEER.md",
+    "LEARNINGS.md",
+    "CLAUDE.md"
+  ]
+}

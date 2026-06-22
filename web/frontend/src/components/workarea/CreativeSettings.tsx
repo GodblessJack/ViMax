@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Film, Monitor, Smartphone, Layout } from 'lucide-react'
+import { Film, Monitor, Smartphone, Layout, Play } from 'lucide-react'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { PRESET_STYLES } from '@/lib/constants'
 
@@ -17,10 +17,17 @@ export function CreativeSettings() {
   const style = useWorkflowStore((s) => s.style)
   const setIdea = useWorkflowStore((s) => s.setIdea)
   const setStyle = useWorkflowStore((s) => s.setStyle)
+  const sendWsMessage = useWorkflowStore((s) => s.sendWsMessage)
+  const sessionId = useWorkflowStore((s) => s.sessionId)
   const [aspRatio, setAspRatio] = useState('16:9')
   const [localIdea, setLocalIdea] = useState(idea)
 
   const selectedStyle = PRESET_STYLES.find((s) => s.key === style)
+
+  const handleStartWorkflow = () => {
+    const message = `我想创作一个短剧：${localIdea || idea}。风格：${selectedStyle?.name || style || '武侠'}。画面比例：${aspRatio}。请开始规划。`
+    sendWsMessage({ type: 'user:message', message })
+  }
 
   return (
     <div className="creative-settings flex-1 overflow-y-auto p-6 space-y-6">
@@ -96,8 +103,16 @@ export function CreativeSettings() {
         <p><span className="text-muted-foreground">比例：</span>{aspRatio}</p>
       </div>
 
+      <button
+        onClick={handleStartWorkflow}
+        disabled={!sessionId}
+        className="w-full py-3 px-4 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <Play className="w-4 h-4" />
+        {sessionId ? '开始创作' : '正在连接...'}
+      </button>
       <p className="text-xs text-muted-foreground text-center">
-        💡 设置完成后，在右侧 AI 助手中点击 <strong>开始规划</strong> 启动创作流程
+        💡 也可以直接在右侧 AI 助手中描述你的创意
       </p>
     </div>
   )
