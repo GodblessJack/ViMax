@@ -742,7 +742,9 @@ async def tool_request_step_execution(
                     "progress_message": f"正在执行 {step_name}...",
                 })
 
-                # Use public API — start_planning triggers all planning steps
+                # V3: Use run_step() (PUBLIC, per-step dispatch) instead of
+                # start_planning() which runs ALL planning steps at once.
+                # run_step() routes to the individual step method based on step_name.
                 idea = params.get("idea", "")
                 style = params.get("style", "wuxia")
                 user_req = params.get("user_requirement", "")
@@ -753,20 +755,15 @@ async def tool_request_step_execution(
                         idea = getattr(session, "idea", "") or idea
                         style = getattr(session, "style", "wuxia") or style
 
-                request = PipelinePlanRequest(
+                step_params = {"idea": idea, "style": style, "user_requirement": user_req}
+                result = await psvc.run_step(
                     session_id=session_id,
-                    idea=idea,
-                    style=style,
-                    user_requirement=user_req,
+                    step_name=canonical,
+                    params=step_params,
                 )
-                await psvc.start_planning(request)
-
-                # Wait for pipeline completion
-                final_stage = await _poll_pipeline_completion(psvc, session_id)
-                if final_stage in ("error", "cancelled", "timeout"):
-                    session = svc.get_session(session_id)
-                    error_msg = getattr(session, "error_message", "") if session else ""
-                    raise RuntimeError(error_msg or f"Planning failed, stage: {final_stage}")
+                if result.get("status") == "error":
+                    error_msg = result.get("error", f"Step {step_name} execution failed")
+                    raise RuntimeError(error_msg)
             else:
                 # Artifacts already exist — broadcast running briefly then completed
                 await agent_service.broadcast(session_id, {
