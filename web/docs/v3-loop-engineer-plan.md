@@ -48,6 +48,7 @@ Round 2: /goal 修复 B2 — ChatPanel 补充"修改后执行"按钮
 Round 3: /goal 补充 6 项设计偏差中的 P1 项 ✅
   └── ✅ ConfirmationGateInline.tsx 组件提取
   └── ✅ user:message 字段名修正 (text → message)
+  └── ✅ Gap #4: run_step() 替代 start_planning() 逐步骤执行
 
 Round 4: /goal 浏览器端到端验证 — 完整 6 步流程
   └── 用 browse skill 截屏 + Codex 分析

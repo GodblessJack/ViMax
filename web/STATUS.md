@@ -49,6 +49,9 @@
 - [x] **ConfirmationGateInline.tsx**: 预确认组件提取 — 2026-06-23
   - 从 AIChatPanel 提取为独立可复用组件
   - 含确认/修改后执行/取消按钮 + 修改输入区
+- [x] **Gap #4 (P1)**: 拆分 _run_planning 批量执行为独立步骤 — 2026-06-23
+  - agent_tools.py: tool_request_step_execution 改用 run_step() 替代 start_planning()
+  - 每步独立执行，匹配 V3 逐步确认流程
 - [x] **loop.config.yaml**: write_branches 加入 feature-v3-upgrade — 根因修复
 - [ ] **Round 4**: 浏览器端到端验证完整 6 步流程
 - [ ] **Round 5**: /triage → /reviewer → 最终 commit
