@@ -329,7 +329,10 @@ export function useSessionWebSocket(sessionId: string | null) {
       if (timerRef.current) clearTimeout(timerRef.current)
       if (pingTimerRef.current) clearInterval(pingTimerRef.current)
     }
-  }, [sessionId, connect, store])
+  // NOTE: intentionally NOT including `store` in deps — Zustand store actions
+  // are stable references. Including `store` causes the cleanup to fire on
+  // every Zustand update, closing the WebSocket immediately after opening.
+  }, [sessionId, connect])
 
   // ── Public API ──────────────────────────────────────────────────────
 
