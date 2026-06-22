@@ -290,7 +290,7 @@ export function useSessionWebSocket(sessionId: string | null) {
       if (pingTimerRef.current) clearInterval(pingTimerRef.current)
       retriesRef.current = 0
     }
-  }, [store])
+  }, []) // mount/unmount only — do NOT re-run on store changes
 
   // ── Session ID changes ──────────────────────────────────────────────
 
