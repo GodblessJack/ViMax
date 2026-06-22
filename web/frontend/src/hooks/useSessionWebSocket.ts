@@ -13,7 +13,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { logger } from '@/lib/logger'
-import type { WsServerEvent, WsClientEvent } from '@/stores/types'
+import type { WsServerEvent, WsClientEvent, WorkflowStepName, PreStepConfirmData } from '@/stores/types'
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -130,7 +130,52 @@ export function useSessionWebSocket(sessionId: string | null) {
           const event = raw as WsServerEvent
           logger.ws('rx', event.type, event)
 
-          // Dispatch to store for state updates
+          // ── V3: Event-specific dispatch (before generic handleWsEvent) ──
+          switch (event.type) {
+            case 'step:need_confirm_before': {
+              const steps = useWorkflowStore.getState().steps
+              const stepIdx = steps.find(s => s.name === event.step)?.index ?? 0
+              const data: PreStepConfirmData = {
+                stepName: event.step as WorkflowStepName,
+                stepIndex: stepIdx,
+                params: event.context.params,
+                estimatedDuration: event.context.estimatedDuration,
+                dependencies: event.context.dependencies,
+                sideEffects: event.context.sideEffects,
+                requestedBy: event.source,
+                timestamp: Date.now(),
+                timeoutMs: 1800000,
+              }
+              store.requestPreConfirm(data)
+              break
+            }
+            case 'step:pre_step_context': {
+              store.updateStepContext({
+                currentProgress: event.currentProgress,
+                availableArtifacts: event.availableArtifacts,
+                agentState: event.agentState,
+              })
+              break
+            }
+            case 'sync:config_changed': {
+              store.setSyncState({
+                configChanges: [
+                  ...useWorkflowStore.getState().syncState.configChanges,
+                  ...event.changes,
+                ].slice(-50),
+              })
+              for (const change of event.changes) {
+                store.updateArtifact(change.path, change.newValue)
+              }
+              break
+            }
+            case 'sync:confirmation_state': {
+              store.handleSyncConfirmation(event.state)
+              break
+            }
+          }
+
+          // Dispatch to store for state updates (backward compat + legacy events)
           store.handleWsEvent(event)
         } catch {
           logger.warn('useSessionWebSocket: malformed message', e.data)
@@ -198,6 +243,30 @@ export function useSessionWebSocket(sessionId: string | null) {
   const sendAction = useCallback((action: string, payload?: unknown) => {
     sendEvent({ type: 'user:action', action, payload })
   }, [sendEvent])
+
+  // ── V3: Pre-exec confirmation helpers ────────────────────────────
+
+  const sendConfirmBefore = useCallback((step: string, reply?: string) => {
+    sendEvent({
+      type: 'user:confirm_before',
+      session_id: sessionId || '',
+      step,
+      phase: 'before',
+      payload: {},
+      reply: reply ?? '',
+    })
+  }, [sendEvent, sessionId])
+
+  const sendRejectBefore = useCallback((step: string, reply?: string, modifiedParams?: Record<string, unknown>) => {
+    sendEvent({
+      type: 'user:reject_before',
+      session_id: sessionId || '',
+      step,
+      phase: 'before',
+      payload: modifiedParams ?? {},
+      reply: reply ?? '',
+    })
+  }, [sendEvent, sessionId])
 
   // ── Lifecycle: mount / unmount ──────────────────────────────────────
 
@@ -272,5 +341,8 @@ export function useSessionWebSocket(sessionId: string | null) {
     sendNavigate,
     sendMessage,
     sendAction,
+    // ── V3: Pre-exec confirmation ──────────────────────────────────
+    sendConfirmBefore,
+    sendRejectBefore,
   }
 }

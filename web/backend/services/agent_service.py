@@ -30,22 +30,138 @@ logger = logging.getLogger(__name__)
 
 AGENT_SYSTEM_PROMPT = """你是 ViMax 的创作助手。你的职责是帮助用户完成短剧创作的全流程。
 
-工作流程:
-1. 首先了解用户的创意想法和需求
-2. 利用工具逐步完成: 故事开发 → 角色抽取 → 剧本创作 → 分镜规划 → 角色肖像生成 → 场景渲染
-3. 每个步骤完成后，必须等待用户确认才能进入下一步
-4. 主动给用户建议，但不替用户做决定
+## 用户意图解析（最高优先级 — 在调用任何工具之前先解析）
 
-重要规则:
+用户的原始输入中通常包含多个维度的创作意图。你必须在处理前解析：
+- **plot** (情节): 简短的故事梗概，如 "小猫打败老虎"
+- **genre** (类型): comedy / wuxia / suspense / scifi / romance / horror / fantasy / slice_of_life / action / documentary
+- **style** (风格): 写实 / 动画 / 水墨 / 赛博朋克 / 绘本 / 皮克斯 / 宫崎骏 / 默片 / 胶片 / 油画
+- **duration** (时长): 15秒 / 30秒 / 60秒 / 90秒 (默认为 60秒)
+
+⚠️ 关键规则: 输入如 "15秒小猫打败老虎" 是**情节描述 (PLOT DESCRIPTION)**，不是角色名字！
+  - "小猫" = 角色身份/物种 (cat)，不是角色名字 "小猫"
+  - "打败" = 情节动作 (fight/defeat)
+  - "老虎" = 对手身份/物种 (tiger)，不是角色名字 "老虎"
+  - "15秒" = duration 约束
+  - 解析结果: {plot: "一只小猫击败了一只老虎", genre: "comedy", duration: "15秒"}
+
+解析优先级: 时间长度 > 动作/行为词 > 身份/物种词 > 人名猜测
+如果描述中只有身份/物种词 (猫/兔/龙/机器人/老师/士兵)，禁止将其当作角色姓名。
+角色姓名由后续 story_generation 步骤的 LLM 自动生成。
+
+## 风格/参数映射表
+
+创作风格将直接影响视频生成的视觉参数。在 run_step 时，根据识别到的 genre/style 选择对应参数:
+
+| genre (类型) | style (视觉风格) | 画面色调 | 镜头偏好 | 节奏 | 适用场景 |
+|-------------|-----------------|---------|---------|------|---------|
+| comedy | 动画/皮克斯 | 暖色高饱和 | 中近景为主 | 快节奏 | 搞笑短片 |
+| wuxia | 水墨/写实 | 冷色低饱和 | 广角大全景 | 中速 | 武侠打斗 |
+| suspense | 写实/胶片 | 暗调高对比 | 特写+手持 | 慢→快 | 悬疑推理 |
+| scifi | 赛博朋克 | 霓虹冷调 | 广角对称 | 中速 | 科幻未来 |
+| romance | 绘本/宫崎骏 | 暖柔粉调 | 浅景深近景 | 慢节奏 | 爱情故事 |
+| horror | 写实/暗调 | 极端暗调 | 窥视视角 | 慢→突发 | 恐怖惊悚 |
+| fantasy | 油画/动画 | 高饱和魔幻 | 鸟瞰+仰拍 | 中速 | 奇幻冒险 |
+| slice_of_life | 写实/绘本 | 自然中性 | 平视中景 | 舒缓 | 日常故事 |
+| action | 写实/动画 | 高对比冷调 | 快速摇镜 | 极快 | 动作战斗 |
+| documentary | 写实/胶片 | 自然光 | 手持跟拍 | 自然 | 纪实风格 |
+
+这些参数作为 run_step 调用时的 params.style 和 params.user_requirement 传递。
+
+## Pipeline 上下文感知
+
+在每个步骤前，检查当前 pipeline 进度:
+- 使用 get_session_state 获取已完成的步骤、可用产物
+- 使用 inspect_pipeline 获取细粒度的子步骤进度
+- 使用 read_artifact 读取产物内容以理解上下文
+
+## 工作流程
+
+1. 首先解析用户输入，提取 genre/plot/style/duration 四元组
+2. 如果信息不足，使用 ask_user 询问缺失的关键维度
+3. 利用工具逐步完成: 故事开发 → 角色抽取 → 剧本创作 → 分镜规划 → 角色肖像生成 → 场景渲染
+4. 每个步骤执行前先做预确认 (broadcast step:need_confirm_before)，等待用户确认后再执行
+5. 每个步骤完成后，必须等待用户确认才能进入下一步
+6. 主动给用户建议，但不替用户做决定
+
+## 重要规则
+
 - 使用 get_session_state 了解当前会话状态
 - 使用 read_artifact 读取已生成的产物
-- 使用 run_step 执行每个流水线步骤
-- 使用 request_confirmation 在每个步骤完成后请求用户确认
+- 使用 inspect_pipeline 内省 pipeline 详细进度
+- 使用 run_step 执行每个流水线步骤 (带 require_confirm_before 参数)
+- 使用 request_confirmation 在每个步骤完成后请求用户确认 (phase='after')
 - 使用 ask_user 向用户提问以获取更多信息
 - 使用 update_artifact 根据用户反馈修改产物内容
 - 如果用户想重来，使用 restart_workflow
 - 始终用中文与用户交流，保持简洁友好
-- 不要替用户做创作决定，只给建议"""
+- 不要替用户做创作决定，只给建议
+- 执行步骤前必须广播预确认通知，等待用户确认后才能开始执行"""
+
+# ── Step metadata for pre-step confirmation broadcasts ──────────────────
+
+_STEP_META_DEFAULT = {
+    "label": "未知步骤",
+    "estimated_duration": "约 30 秒",
+    "side_effects": ["会在会话工作区创建产物文件"],
+}
+
+_STEP_META: dict[str, dict] = {
+    "story_generation": {
+        "label": "故事构思",
+        "estimated_duration": "约 30 秒",
+        "side_effects": [
+            "会在会话工作区创建 idea2video/story.txt",
+            "会调用 LLM 生成故事文本",
+        ],
+    },
+    "character_extraction": {
+        "label": "角色提取",
+        "estimated_duration": "约 20 秒",
+        "side_effects": [
+            "读取 idea2video/story.txt 中的故事文本",
+            "会调用 LLM 提取角色信息",
+            "会在会话工作区创建 idea2video/characters.json",
+        ],
+    },
+    "script_writing": {
+        "label": "剧本编写",
+        "estimated_duration": "约 30 秒",
+        "side_effects": [
+            "读取 story.txt 和 characters.json",
+            "会调用 LLM 编写分场景剧本",
+            "会在会话工作区创建 idea2video/script.json",
+        ],
+    },
+    "storyboard_design": {
+        "label": "分镜设计",
+        "estimated_duration": "约 60 秒 (多场景)",
+        "side_effects": [
+            "读取 script.json 中的场景列表",
+            "会调用 LLM 为每个场景设计分镜",
+            "会在会话工作区创建 idea2video/scene_N/storyboard.json",
+        ],
+    },
+    "character_portraits": {
+        "label": "角色肖像生成",
+        "estimated_duration": "约 2 分钟 (多角色)",
+        "side_effects": [
+            "读取 characters.json 中的角色信息",
+            "会调用图像生成模型为每个角色生成肖像",
+            "会在会话工作区创建 idea2video/character_portraits/",
+        ],
+    },
+    "video_rendering": {
+        "label": "视频渲染",
+        "estimated_duration": "约 5 分钟 (多场景)",
+        "side_effects": [
+            "读取 storyboard.json 和角色肖像",
+            "会调用视频渲染引擎合成每个场景",
+            "会在会话工作区创建 idea2video/scene_N/output.mp4",
+            "这是最耗时的步骤，请确认参数无误",
+        ],
+    },
+}
 
 
 class AgentService:
@@ -188,6 +304,50 @@ class AgentService:
             "reply": "",
         })
 
+    async def handle_confirm_before(
+        self,
+        session_id: str,
+        step: str = "",
+        payload: dict[str, Any] | None = None,
+        reply: str = "",
+    ) -> None:
+        """Handle a user:confirm_before event -- user approves pre-execution step.
+
+        Resumes the confirmation gate so the Agent proceeds to execute the step.
+        """
+        logger.info(
+            "handle_confirm_before: session=%s step=%s reply=%.80s",
+            session_id, step, reply or "(empty)",
+        )
+        self._confirmation_gate.resume(session_id, {
+            "action": "confirm_before",
+            "step": step,
+            "payload": payload or {},
+            "reply": reply,
+        })
+
+    async def handle_reject_before(
+        self,
+        session_id: str,
+        step: str = "",
+        payload: dict[str, Any] | None = None,
+        reply: str = "",
+    ) -> None:
+        """Handle a user:reject_before event -- user rejects pre-execution step.
+
+        Includes optional modified parameters for the Agent to adjust before re-execution.
+        """
+        logger.info(
+            "handle_reject_before: session=%s step=%s reply=%.80s",
+            session_id, step, reply or "(empty)",
+        )
+        self._confirmation_gate.resume(session_id, {
+            "action": "reject_before",
+            "step": step,
+            "payload": payload or {},
+            "reply": reply,
+        })
+
     async def handle_modify(
         self,
         session_id: str,
@@ -283,6 +443,149 @@ class AgentService:
         if session_id not in self._conversations:
             self._conversations[session_id] = []
         return self._conversations[session_id]
+
+    # ── User intent parsing ─────────────────────────────────────────────
+
+    def parse_user_intent(self, raw_input: str) -> dict[str, str]:
+        """Parse raw user input into structured intent: {genre, plot, style, duration}.
+
+        Rules (in priority order):
+          1. Detect duration pattern: N秒 / Ns / Nmin / N分钟
+          2. Detect action/behavior words → these indicate PLOT, not names
+          3. Detect identity/species words (猫/兔/龙/机器人/老师/士兵...) → roles, not names
+          4. Detect genre keywords → map to genre
+          5. Detect style keywords → map to visual style
+          6. Remaining text → plot description
+
+        ⚠️  "15秒小猫打败老虎" → {plot: "一只小猫击败了一只老虎", genre: "comedy",
+                                    duration: "15秒"} — NOT character names!
+        """
+        import re
+
+        result: dict[str, str] = {
+            "genre": "",
+            "plot": "",
+            "style": "",
+            "duration": "60",  # seconds, default
+        }
+
+        s = raw_input.strip()
+        if not s:
+            result["plot"] = raw_input
+            return result
+
+        # ── Step 1: Extract duration ──────────────────────────────────
+        dur_patterns = [
+            (r"(\d+)\s*秒", "seconds"),
+            (r"(\d+)\s*s\b", "seconds"),
+            (r"(\d+)\s*分钟?", "minutes"),
+            (r"(\d+)\s*min\b", "minutes"),
+        ]
+        for pat, unit in dur_patterns:
+            m = re.search(pat, s, re.IGNORECASE)
+            if m:
+                val = int(m.group(1))
+                if unit == "minutes":
+                    val *= 60
+                result["duration"] = str(val)
+                s = s[: m.start()] + s[m.end() :]
+                s = s.strip()
+                break
+
+        # ── Step 2: Detect genre keywords ─────────────────────────────
+        genre_map = {
+            "喜剧": "comedy", "搞笑": "comedy", "幽默": "comedy",
+            "武侠": "wuxia", "江湖": "wuxia",
+            "悬疑": "suspense", "推理": "suspense", "侦探": "suspense",
+            "科幻": "scifi", "未来": "scifi", "机器人": "scifi", "AI": "scifi",
+            "爱情": "romance", "恋爱": "romance", "言情": "romance",
+            "恐怖": "horror", "惊悚": "horror", "鬼": "horror",
+            "奇幻": "fantasy", "魔法": "fantasy", "仙侠": "fantasy",
+            "日常": "slice_of_life", "生活": "slice_of_life", "校园": "slice_of_life",
+            "动作": "action", "战斗": "action", "格斗": "action",
+            "纪实": "documentary", "记录": "documentary",
+        }
+        for keyword, genre_val in genre_map.items():
+            if keyword in s:
+                result["genre"] = genre_val
+                s = s.replace(keyword, " ").strip()
+                break
+
+        # ── Step 3: Detect style keywords ─────────────────────────────
+        style_map = {
+            "水墨": "ink_wash", "国画": "ink_wash",
+            "写实": "realistic",
+            "动画": "animation", "卡通": "animation",
+            "赛博": "cyberpunk", "朋克": "cyberpunk",
+            "绘本": "picture_book",
+            "皮克斯": "pixar",
+            "宫崎骏": "ghibli",
+            "默片": "silent_film",
+            "胶片": "film",
+            "油画": "oil_painting",
+        }
+        for keyword, style_val in style_map.items():
+            if keyword in s:
+                result["style"] = style_val
+                s = s.replace(keyword, " ").strip()
+                break
+
+        # ── Step 4: Identify action/behavior words → PLOT markers ─────
+        action_words = [
+            "打败", "战胜", "击败", "战斗", "打架",
+            "逃跑", "追逐", "追赶",
+            "寻找", "发现", "探索",
+            "拯救", "保护", "守卫",
+            "爱上", "喜欢", "暗恋",
+            "变身", "穿越", "转生",
+            "搞笑", "整蛊", "恶搞",
+            "做饭", "烹饪", "开店",
+            "上学", "考试", "毕业",
+            "冒险", "旅行", "探险",
+            "比赛", "对决", "竞争",
+            "冒充", "伪装", "隐藏",
+            "成长为", "变成", "成为",
+            "复仇", "报复",
+        ]
+        found_action = any(w in s for w in action_words)
+
+        # ── Step 5: Detect identity/species words → roles, NOT names ──
+        role_species = [
+            "小猫", "小狗", "兔子", "龙", "凤凰",
+            "猫", "狗", "鸟", "鱼", "狐狸", "狼", "熊", "虎", "蛇", "鹰",
+            "老师", "学生", "医生", "警察", "士兵", "厨师", "司机",
+            "男孩", "女孩", "少年", "少女", "老人", "小孩", "婴儿",
+            "机器人", "AI", "外星人", "幽灵", "吸血鬼", "僵尸",
+            "公主", "王子", "国王", "女王", "骑士", "巫师", "精灵",
+            "忍者", "武士", "剑客",
+        ]
+        # Only flag as plot if there's also an action word present
+        has_role = any(w in s for w in role_species)
+
+        # ── Step 6: Remaining text → plot description ─────────────────
+        if found_action or has_role:
+            # This is clearly a plot description, not a character name
+            remaining = s.strip()
+            if remaining:
+                result["plot"] = remaining
+            else:
+                result["plot"] = s
+        else:
+            # Could be a name or abstract idea
+            result["plot"] = s.strip()
+
+        # ── Fallback genre ────────────────────────────────────────────
+        if not result["genre"]:
+            # Infer from content
+            if found_action and ("搞笑" in raw_input or "喜剧" in raw_input
+                                 or "好笑" in raw_input or "逗" in raw_input):
+                result["genre"] = "comedy"
+            elif found_action:
+                result["genre"] = "action"
+            else:
+                result["genre"] = "slice_of_life"
+
+        return result
 
     # ── Tool execution ──────────────────────────────────────────────────
 
@@ -434,13 +737,98 @@ class AgentService:
                     logger.info("Workflow: session %s cancelled, stopping", session_id)
                     break
 
-                # Announce step start
+                # ── Pre-step confirmation ──────────────────────────────
+                # Build step metadata for pre-step confirm broadcast
+                step_meta = _STEP_META.get(step_name, _STEP_META_DEFAULT)
+                step_deps = [s for s in WORKFLOW_STEP_NAMES[
+                    :WORKFLOW_STEP_NAMES.index(step_name)
+                ]]
+                step_params: dict[str, Any] = {
+                    "idea": idea, "style": style,
+                    "user_requirement": user_requirement,
+                }
+
+                await self.broadcast(session_id, {
+                    "type": "step:need_confirm_before",
+                    "step": step_name,
+                    "session_id": session_id,
+                    "phase": "before",
+                    "message": (
+                        f"即将开始执行 [{step_meta['label']}]，"
+                        f"预估耗时 {step_meta['estimated_duration']}。"
+                        f"参数: idea={idea[:60]}, style={style}。是否继续？"
+                    ),
+                    "context": {
+                        "stepName": step_name,
+                        "params": step_params,
+                        "estimatedDuration": step_meta["estimated_duration"],
+                        "dependencies": step_deps,
+                        "sideEffects": step_meta["side_effects"],
+                    },
+                    "source": "agent",
+                })
+
+                # Announce step preparing
                 await self.broadcast(session_id, {
                     "type": "pipeline:status",
                     "session_id": session_id,
                     "stage": step_name,
                     "message": f"Starting {step_name}",
                 })
+
+                # Wait for user to confirm before executing
+                logger.info(
+                    "Workflow: PRE-STEP waiting confirmation for %s (session %s)",
+                    step_name, session_id,
+                )
+                try:
+                    pre_gate = await self._confirmation_gate.wait_for_confirmation(
+                        session_id=session_id,
+                        prompt=f"[{step_meta['label']}] 即将开始执行，是否继续？",
+                        timeout=1800.0,
+                        step_name=f"{step_name}:before",
+                    )
+                    pre_action = pre_gate.get("action", "")
+                    if pre_action == "reject_before":
+                        pre_reply = pre_gate.get("reply", "")
+                        pre_payload = pre_gate.get("payload", {})
+                        logger.info(
+                            "Workflow: user REJECTED before step %s, reply=%.100s",
+                            step_name, pre_reply,
+                        )
+                        # Adjust params based on user feedback
+                        if isinstance(pre_payload, dict):
+                            new_idea = pre_payload.get("idea", "")
+                            new_style = pre_payload.get("style", "")
+                            if new_idea:
+                                idea = new_idea
+                            if new_style:
+                                style = new_style
+                            user_requirement = pre_payload.get(
+                                "user_requirement", pre_reply or user_requirement,
+                            )
+                        elif pre_reply:
+                            user_requirement = pre_reply
+                        # Loop back to same step with adjusted params
+                        continue
+                    elif pre_action == "cancelled":
+                        svc._index.update_stage(session_id, "cancelled", "用户取消")
+                        return
+                    # "confirm_before", "confirm", "", or timeout → proceed
+                    logger.info(
+                        "Workflow: pre-step confirmed for %s (action=%s), proceeding",
+                        step_name, pre_action,
+                    )
+                except asyncio.TimeoutError:
+                    logger.info(
+                        "Workflow: pre-step timeout for %s, proceeding anyway",
+                        step_name,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Workflow: pre-step gate error for %s, proceeding",
+                        step_name,
+                    )
 
                 # Execute the step via tool_run_step
                 result = await tool_run_step(
@@ -578,7 +966,7 @@ class AgentService:
             logger.exception("Workflow failed for session %s", session_id)
             try:
                 await self.broadcast(session_id, {
-                    "type": "pipeline:error",
+                    "type": "pipeline_error",
                     "stage": "error",
                     "error": f"工作流出错: {exc}",
                 })

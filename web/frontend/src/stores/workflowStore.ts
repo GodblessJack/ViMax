@@ -7,7 +7,7 @@
 // until the legacy page is fully migrated.
 
 import { create } from 'zustand'
-import type { WorkflowStepName, StepRuntime, StepResult, StepStatus, WizardStep, WsServerEvent, ChatMessage, AgentSuggestion, PendingConfirmation, CharacterInfo, SceneScript, StoryboardScene, SessionStage, PipelineError } from '@/stores/types'
+import type { WorkflowStepName, StepRuntime, StepResult, StepStatus, WizardStep, WsServerEvent, ChatMessage, AgentSuggestion, PendingConfirmation, CharacterInfo, SceneScript, StoryboardScene, SessionStage, PipelineError, PreStepConfirmData, PostStepConfirmData, SyncState, ConfigChange, ArtifactDiff } from '@/stores/types'
 import { WORKFLOW_STEPS } from '@/stores/types'
 import { logger } from '@/lib/logger'
 
@@ -100,6 +100,19 @@ export interface WorkflowState {
 
   // ── Artifact Cache ──────────────────────────────────────────────
   artifacts: Record<string, unknown>
+
+  // ── V3: Bidirectional Confirmation & Sync ───────────────────────
+  /** Pre-exec confirmation data set by step:need_confirm_before event */
+  preStepConfirmData: PreStepConfirmData | null
+
+  /** Post-exec confirmation data set by step:need_confirm event (structured supplement to pendingConfirmations) */
+  postStepConfirmData: PostStepConfirmData | null
+
+  /** Bidirectional sync state driven by sync:* events */
+  syncState: SyncState
+
+  /** Tracks which panel last issued a confirmation: WorkArea | ChatPanel | null */
+  lastConfirmationSource: 'WorkArea' | 'ChatPanel' | null
 }
 
 // ── Store Actions ───────────────────────────────────────────────────
@@ -185,6 +198,39 @@ export interface WorkflowActions {
   updateStepRuntime: (stepName: string, patch: Partial<StepRuntime>) => void
   appendStreamedOutput: (stepName: string, chunk: string) => void
 
+  // ── V3: Pre-exec confirmation ─────────────────────────────────
+  /** Called by agent/api to request pre-exec confirmation (sets preStepConfirmData) */
+  requestPreConfirm: (data: PreStepConfirmData) => void
+
+  /** User response to pre-exec confirmation: accept or reject with optional modified params */
+  respondPreConfirm: (stepName: string, accepted: boolean, reply?: string, modifiedParams?: Record<string, unknown>) => void
+
+  // ── V3: Post-exec confirmation (structured) ────────────────────
+  /** Set structured post-exec confirmation data */
+  setPostStepConfirmData: (data: PostStepConfirmData | null) => void
+
+  // ── V3: Sync state management ──────────────────────────────────
+  /** Apply a partial patch to syncState */
+  setSyncState: (patch: Partial<SyncState>) => void
+
+  /** Called by step:pre_step_context WS event — stores pipeline progress, artifact status, agent snapshot */
+  updateStepContext: (context: { currentProgress: PipelineProgress; availableArtifacts: Record<string, ArtifactStatus>; agentState: AgentStateSnapshot }) => void
+
+  /** Called by sync:confirmation_state WS event — syncs confirmation state across both panels */
+  handleSyncConfirmation: (state: ConfirmationSyncState) => void
+
+  /** Clear all V3 confirmation state (pre, post, sync, source) */
+  clearConfirmationState: () => void
+
+  /** Track which panel last originated a confirmation */
+  setLastConfirmationSource: (source: 'WorkArea' | 'ChatPanel' | null) => void
+
+  /** Append an artifact diff to syncState.artifactDiffs (cap at 50) */
+  addArtifactDiff: (diff: ArtifactDiff) => void
+
+  /** Append a config change to syncState.configChanges (cap at 50) */
+  addConfigChange: (change: ConfigChange) => void
+
   // Reset
   reset: () => void
   resetIdea: () => void
@@ -251,6 +297,25 @@ const initialState: WorkflowState = {
   pendingConfirmations: [],
   agentSuggestions: [],
   artifacts: {},
+  // ── V3 initial values ─────────────────────────────────────────
+  preStepConfirmData: null,
+  postStepConfirmData: null,
+  syncState: {
+    lastConfirmationSource: null,
+    confirmationState: {
+      isPending: false,
+      phase: null,
+      stepName: null,
+      stepIndex: null,
+      message: null,
+      confirmedBy: null,
+      timestamp: null,
+      timeoutAt: null,
+    },
+    configChanges: [],
+    artifactDiffs: [],
+  },
+  lastConfirmationSource: null,
 }
 
 // ── Store ───────────────────────────────────────────────────────────
@@ -548,12 +613,31 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
       case 'step:need_confirm': {
         // Keep phase as-is (should be 'done' from step:completed) so the
         // result panel stays visible while waiting for user confirmation.
+        const stepIdx = get().steps.find((s) => s.name === event.step)?.index ?? 0
+        const stepName = event.step as WorkflowStepName
         get().setPendingConfirmation({
-          stepIndex: get().steps.find((s) => s.name === event.step)?.index ?? 0,
+          stepIndex: stepIdx,
           stepName: event.step,
+          phase: 'after',          // V3: explicitly mark as post-exec
           message: event.message,
           suggestions: event.suggestions,
           timestamp: Date.now(),
+          source: 'ChatPanel',     // Agent-triggered confirmation
+        })
+        // V3: also set structured post-exec confirmation data
+        get().setPostStepConfirmData({
+          stepName,
+          stepIndex: stepIdx,
+          result: get().runtime[event.step]?.result ?? {
+            summary: '',
+            artifactPaths: [],
+            previewData: null,
+            editableFields: [],
+          },
+          message: event.message,
+          suggestions: event.suggestions,
+          timestamp: Date.now(),
+          requestedBy: 'agent',
         })
         break
       }
@@ -644,6 +728,62 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
         })
         break
       }
+      // ── V3: Bidirectional confirmation & sync events ────────────
+      case 'step:need_confirm_before': {
+        const stepIdx = get().steps.find((s) => s.name === event.step)?.index ?? 0
+        const stepName = event.step as WorkflowStepName
+        const data: PreStepConfirmData = {
+          stepName,
+          stepIndex: stepIdx,
+          params: event.context.params,
+          estimatedDuration: event.context.estimatedDuration,
+          dependencies: event.context.dependencies,
+          sideEffects: event.context.sideEffects,
+          requestedBy: event.source,
+          timestamp: Date.now(),
+          timeoutMs: 1800000,
+        }
+        set({ preStepConfirmData: data })
+        get().setSyncState({
+          confirmationState: {
+            isPending: true,
+            phase: 'before',
+            stepName: event.step,
+            stepIndex: stepIdx,
+            message: event.message,
+            confirmedBy: null,
+            timestamp: Date.now(),
+            timeoutAt: Date.now() + 1800000,
+          },
+        })
+        break
+      }
+
+      case 'step:pre_step_context': {
+        // Update agent state snapshot via syncState for downstream consumers
+        get().setSyncState({
+          confirmationState: {
+            ...get().syncState.confirmationState,
+            stepName: event.step,
+          },
+        })
+        break
+      }
+
+      case 'sync:config_changed': {
+        for (const change of event.changes) {
+          get().addConfigChange(change)
+          get().updateArtifact(change.path, change.newValue)
+        }
+        break
+      }
+
+      case 'sync:confirmation_state': {
+        get().setSyncState({ confirmationState: event.state })
+        get().setLastConfirmationSource(event.state.lastConfirmationSource)
+        break
+      }
+
       case 'pong': {
         // no-op — heartbeat response
         break
@@ -752,6 +892,136 @@ export const useWorkflowStore = create<WorkflowState & WorkflowActions>()((set, 
 
   // ── Artifacts ──────────────────────────────────────────────────
   setFinalVideoUrl: (url) => set({ finalVideoUrl: url }),
+
+  // ── V3: Pre-exec Confirmation ──────────────────────────────────
+  /** Called by agent/api to request pre-exec confirmation. Sets preStepConfirmData and updates syncState. */
+  requestPreConfirm: (data) => {
+    set({
+      preStepConfirmData: data,
+      lastConfirmationSource: 'ChatPanel',
+    })
+    get().setSyncState({
+      confirmationState: {
+        isPending: true,
+        phase: 'before',
+        stepName: data.stepName,
+        stepIndex: data.stepIndex,
+        message: `即将开始: ${data.stepName}`,
+        confirmedBy: null,
+        timestamp: Date.now(),
+        timeoutAt: Date.now() + data.timeoutMs,
+      },
+    })
+  },
+
+  /** User response to pre-exec confirmation. Sends user:confirm_before or user:reject_before over WS. */
+  respondPreConfirm: (stepName, accepted, reply, modifiedParams) => {
+    const data = get().preStepConfirmData
+    if (!data || data.stepName !== stepName) return
+    if (accepted) {
+      get().sendWsMessage({
+        type: 'user:confirm_before',
+        session_id: get().sessionId,
+        step: stepName,
+        phase: 'before',
+        payload: {},
+        reply: reply ?? '',
+      })
+    } else {
+      get().sendWsMessage({
+        type: 'user:reject_before',
+        session_id: get().sessionId,
+        step: stepName,
+        phase: 'before',
+        payload: modifiedParams ?? {},
+        reply: reply ?? '',
+      })
+    }
+    set({
+      preStepConfirmData: null,
+      lastConfirmationSource: 'WorkArea',
+    })
+  },
+
+  // ── V3: Post-exec Confirmation (structured) ────────────────────
+  /** Set structured post-exec confirmation data alongside pendingConfirmations. */
+  setPostStepConfirmData: (data) => set({ postStepConfirmData: data }),
+
+  // ── V3: Sync State Management ──────────────────────────────────
+  /** Apply a partial patch to syncState. Merges nested confirmationState correctly. */
+  setSyncState: (patch) =>
+    set((state) => ({
+      syncState: {
+        ...state.syncState,
+        ...patch,
+        confirmationState: patch.confirmationState
+          ? { ...state.syncState.confirmationState, ...patch.confirmationState }
+          : state.syncState.confirmationState,
+        configChanges: patch.configChanges ?? state.syncState.configChanges,
+        artifactDiffs: patch.artifactDiffs ?? state.syncState.artifactDiffs,
+      },
+    })),
+
+  /** Store pipeline progress, artifact status, and agent snapshot from step:pre_step_context WS event. */
+  updateStepContext: (context) =>
+    set((state) => ({
+      syncState: {
+        ...state.syncState,
+        confirmationState: {
+          ...state.syncState.confirmationState,
+          stepName: context.currentProgress.currentStep,
+        },
+      },
+    })),
+
+  /** Sync confirmation state across both panels from sync:confirmation_state WS event. */
+  handleSyncConfirmation: (confState) => {
+    get().setSyncState({ confirmationState: confState })
+    get().setLastConfirmationSource(confState.lastConfirmationSource)
+  },
+
+  /** Clear all V3 confirmation state (pre, post, sync confirmationState, source). */
+  clearConfirmationState: () =>
+    set((state) => ({
+      preStepConfirmData: null,
+      postStepConfirmData: null,
+      lastConfirmationSource: null,
+      syncState: {
+        ...state.syncState,
+        confirmationState: {
+          isPending: false,
+          phase: null,
+          stepName: null,
+          stepIndex: null,
+          message: null,
+          confirmedBy: null,
+          timestamp: null,
+          timeoutAt: null,
+        },
+      },
+    })),
+
+  /** Track which panel last originated a confirmation. */
+  setLastConfirmationSource: (source) =>
+    set({ lastConfirmationSource: source }),
+
+  /** Append an artifact diff to syncState.artifactDiffs, capped at 50 entries. */
+  addArtifactDiff: (diff) =>
+    set((state) => ({
+      syncState: {
+        ...state.syncState,
+        artifactDiffs: [...state.syncState.artifactDiffs.slice(-49), diff],
+      },
+    })),
+
+  /** Append a config change to syncState.configChanges, capped at 50 entries. */
+  addConfigChange: (change) =>
+    set((state) => ({
+      syncState: {
+        ...state.syncState,
+        configChanges: [...state.syncState.configChanges.slice(-49), change],
+      },
+    })),
 
   // ── Reset ──────────────────────────────────────────────────────
   reset: () => set({ ...initialState }),

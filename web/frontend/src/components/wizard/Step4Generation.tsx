@@ -18,7 +18,7 @@ type Step4Props = {
 export default function Step4Generation({ events, connected, connectionState, totalShots, onCancel, cancelled }: Step4Props) {
   const renderEvents = events.filter(e => e.type === 'render_progress')
   const statusEvents = events.filter(e => e.type === 'pipeline_status')
-  const completeEvent = events.find(e => e.type === 'pipeline_complete')
+  const completeEvent = events.find(e => e.type === 'pipeline:complete' || e.type === 'pipeline_complete')
   const errorEvents = events.filter(e => e.type === 'pipeline_error')
 
   const donePortraits = renderEvents.filter(e => e.stage === 'character_portrait' && e.phase === 'done')
@@ -191,7 +191,7 @@ export default function Step4Generation({ events, connected, connectionState, to
             <div key={`log-${i}`} className={cn(
               'text-[11px] leading-relaxed',
               e.type === 'pipeline_error' && 'text-destructive',
-              e.type === 'pipeline_complete' && 'text-success font-semibold',
+              (e.type === 'pipeline:complete' || e.type === 'pipeline_complete') && 'text-success font-semibold',
             )}>
               [{e.type}] {e.stage} {e.phase || ''} {e.message || ''}
             </div>

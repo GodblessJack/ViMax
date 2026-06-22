@@ -120,9 +120,121 @@ export interface AgentSuggestion {
 export interface PendingConfirmation {
   stepIndex: number
   stepName: string
+  phase?: 'before' | 'after'                // V3: distinguish pre-exec vs post-exec confirmation
   message: string
   suggestions: string[]
   timestamp: number
+  context?: {                                // V3: pre-exec confirmation parameter context
+    params?: Record<string, unknown>
+    estimatedDuration?: string
+    dependencies?: string[]
+    sideEffects?: string[]
+  }
+  source?: 'WorkArea' | 'ChatPanel'          // V3: which panel originated the confirmation request
+}
+
+// ── V3: Pre/Post Step Confirmation Data ────────────────────────────
+
+export interface PreStepConfirmData {
+  stepName: WorkflowStepName
+  stepIndex: number
+  params: Record<string, unknown>     // parameters that will be passed to PipelineService
+  estimatedDuration: string           // e.g. "约 30 秒"
+  dependencies: string[]              // prerequisite step names
+  sideEffects: string[]               // side effect descriptions
+  requestedBy: 'agent' | 'user'       // who requested confirmation
+  timestamp: number
+  timeoutMs: number                   // confirmation timeout in ms, default 1800000
+}
+
+export interface PostStepConfirmData {
+  stepName: WorkflowStepName
+  stepIndex: number
+  result: StepResult                  // step execution result
+  message: string
+  suggestions: string[]
+  timestamp: number
+  requestedBy: 'agent' | 'user'
+}
+
+// ── V3: Sync State & Bidirectional Tracking ─────────────────────────
+
+export interface ConfigChange {
+  path: string                         // file path
+  field?: string                       // JSON path
+  oldValue: unknown
+  newValue: unknown
+  changedBy: 'user' | 'agent'
+  source: 'WorkArea' | 'ChatPanel' | 'Agent'
+  timestamp: number
+}
+
+export interface ArtifactDiff {
+  artifactPath: string
+  oldContent: string | null            // null means newly created
+  newContent: string | null            // null means deleted
+  diff: string                         // unified diff format
+  changedBy: 'user' | 'agent'
+  source: 'WorkArea' | 'ChatPanel' | 'Agent'
+  timestamp: number
+}
+
+export interface SyncState {
+  lastConfirmationSource: 'WorkArea' | 'ChatPanel' | null
+  confirmationState: {
+    isPending: boolean
+    phase: 'before' | 'after' | null
+    stepName: string | null
+    stepIndex: number | null
+    message: string | null
+    confirmedBy: 'user' | 'agent' | null
+    timestamp: number | null
+    timeoutAt: number | null
+  }
+  configChanges: ConfigChange[]
+  artifactDiffs: ArtifactDiff[]
+}
+
+// ── V3: Helper Types for WS Events ──────────────────────────────────
+
+export interface PreStepConfirmContext {
+  stepName: string
+  params: Record<string, unknown>
+  estimatedDuration: string
+  dependencies: string[]
+  sideEffects: string[]
+}
+
+export interface PipelineProgress {
+  completedSteps: string[]
+  currentStep: string
+  totalSteps: number
+  completionPercent: number
+}
+
+export interface ArtifactStatus {
+  exists: boolean
+  size?: number
+  lastModified?: string
+}
+
+export interface AgentStateSnapshot {
+  isBusy: boolean
+  currentTool: string | null
+  waitingForConfirmation: boolean
+}
+
+export interface ConfirmationSyncState {
+  isPending: boolean
+  phase: 'before' | 'after' | null
+  stepName: string | null
+  stepIndex: number | null
+  message: string | null
+  suggestions: string[]
+  lastConfirmationSource: 'WorkArea' | 'ChatPanel' | null
+  confirmedBy: 'user' | 'agent' | null
+  timestamp: number | null
+  timeoutAt: number | null
 }
 
 // ── Pipeline Error ───────────────────────────────────────────────────
@@ -164,6 +276,11 @@ export type WsServerEvent =
   | { type: 'artifact_ready'; path?: string; url?: string }
   | { type: 'render_progress'; stage?: string; phase?: string; image_url?: string; character?: string; view?: string; shot_idx?: number; metadata?: Record<string, unknown> }
   | { type: 'pipeline_error'; error?: string }
+  // === V3: Bidirectional confirmation & sync events ===
+  | { type: 'step:need_confirm_before'; step: string; session_id: string; phase: 'before'; message: string; context: PreStepConfirmContext; source: 'agent' }
+  | { type: 'step:pre_step_context'; session_id: string; step: string; currentProgress: PipelineProgress; availableArtifacts: Record<string, ArtifactStatus>; agentState: AgentStateSnapshot }
+  | { type: 'sync:config_changed'; session_id: string; changedBy: 'user' | 'agent'; source: 'WorkArea' | 'ChatPanel' | 'Agent'; changes: ConfigChange[]; timestamp: number }
+  | { type: 'sync:confirmation_state'; session_id: string; state: ConfirmationSyncState }
 
 // Client → Server
 export type WsClientEvent =
@@ -174,6 +291,9 @@ export type WsClientEvent =
   | { type: 'user:message'; text: string; context?: { current_step?: string; referenced_artifact?: string } }
   | { type: 'user:action'; action: string; payload?: unknown }
   | { type: 'ping' }
+  // === V3: Pre-exec confirmation events ===
+  | { type: 'user:confirm_before'; session_id: string; step: string; phase: 'before'; payload?: Record<string, unknown>; reply?: string }
+  | { type: 'user:reject_before'; session_id: string; step: string; phase: 'before'; payload?: Record<string, unknown>; reply?: string }
 
 // ── Legacy Session Types (re-exported for compatibility) ────────────
 

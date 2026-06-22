@@ -1,15 +1,10 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Wand2 } from 'lucide-react'
+import { Wand2, CheckCircle, RotateCcw, MessageSquare, AlertTriangle, Play } from 'lucide-react'
 import type { WizardStep } from '@/lib/types'
 import type { ChatMessage as StoreChatMessage, AgentSuggestion } from '@/stores/types'
-import { PRESET_STYLES } from '@/lib/constants'
+import { useWorkflowStore } from '@/stores/workflowStore'
 import { ChatMessage, TypingIndicator } from '@/components/ui/ChatMessage'
-import { ChatInput, SuggestionBar, QuickActions } from '@/components/layout/chat'
-
-function styleDisplayName(key: string): string {
-  const found = PRESET_STYLES.find(s => s.key === key)
-  return found ? `${found.emoji} ${found.name}` : key
-}
+import { ChatInput, SuggestionBar } from '@/components/layout/chat'
 
 type Message = { role: 'user' | 'ai' | 'system'; text: string }
 
@@ -18,20 +13,24 @@ type AIChatPanelProps = {
   sessionId: string | null
   idea: string
   style: string
-  onIdeaExtracted: (idea: string) => void
-  onStyleExtracted: (style: string) => void
-  onStartPlanning: () => void
+  /** @deprecated V3: idea/style extraction is now WS/Agent-driven, not frontend hardcoded */
+  onIdeaExtracted?: (idea: string) => void
+  /** @deprecated V3: idea/style extraction is now WS/Agent-driven, not frontend hardcoded */
+  onStyleExtracted?: (style: string) => void
+  onStartPlanning?: () => void
   onSendMessage?: (message: string) => Promise<string | null>
   /* Context for data-driven greetings */
   storyChars?: number
   characterCount?: number
   sceneCount?: number
   totalShots?: number
-  /* ── NEW: Store wiring (additive alongside existing props) ── */
+  /* Store wiring (additive alongside existing props) */
   storeChatMessages?: StoreChatMessage[]
   storeAgentSuggestions?: AgentSuggestion[]
   onWSSendMessage?: (message: string) => void
 }
+
+// ── Context-aware greeting (informational, no hardcoded extraction) ────
 
 function buildGreeting(step: WizardStep, ctx: {
   storyChars?: number; characterCount?: number; sceneCount?: number; totalShots?: number
@@ -58,58 +57,54 @@ function buildGreeting(step: WizardStep, ctx: {
   }
 }
 
-const STYLE_KEYWORDS: Record<string, string> = {
-  '武侠': 'wuxia', '古风': 'ancient', '古代': 'ancient',
-  '现代': 'modern', '都市': 'modern', '城市': 'modern',
-  '悬疑': 'suspense', '恐怖': 'suspense', '惊悚': 'suspense',
-  '喜剧': 'comedy', '搞笑': 'comedy', '幽默': 'comedy',
-  '写实': 'realistic', '真实': 'realistic', '纪录片': 'realistic',
-  '动漫': 'anime', '二次元': 'anime', '动画': 'anime',
-}
-
-function extractStyle(text: string): string | null {
-  for (const [keyword, style] of Object.entries(STYLE_KEYWORDS)) {
-    if (text.includes(keyword)) return style
-  }
-  return null
-}
+// ── Component ──────────────────────────────────────────────────────────
 
 export default function AIChatPanel({
-  step, onIdeaExtracted, onStyleExtracted, onStartPlanning,
+  step, onStartPlanning,
   onSendMessage,
   storyChars, characterCount, sceneCount, totalShots,
   storeChatMessages, storeAgentSuggestions, onWSSendMessage,
 }: AIChatPanelProps) {
+  // ── V3: Store subscriptions (confirmation state, suggestions) ────
+  const pendingConfirmations = useWorkflowStore((s) => s.pendingConfirmations)
+  const preStepConfirmData = useWorkflowStore((s) => s.preStepConfirmData)
+  const postStepConfirmData = useWorkflowStore((s) => s.postStepConfirmData)
+  const syncState = useWorkflowStore((s) => s.syncState)
+  const lastConfirmationSource = useWorkflowStore((s) => s.lastConfirmationSource)
+  const storeAgentSuggestionsFromStore = useWorkflowStore((s) => s.agentSuggestions)
+  const confirmStep = useWorkflowStore((s) => s.confirmStep)
+  const requestRegenerate = useWorkflowStore((s) => s.requestRegenerate)
+  const requestModify = useWorkflowStore((s) => s.requestModify)
+  const sendWsMessage = useWorkflowStore((s) => s.sendWsMessage)
+  const connectionState = useWorkflowStore((s) => s.connectionState)
+  const storeSessionId = useWorkflowStore((s) => s.sessionId)
+  const respondPreConfirm = useWorkflowStore((s) => s.respondPreConfirm)
+
+  // ── Local state ──────────────────────────────────────────────────
   const greeting = buildGreeting(step, { storyChars, characterCount, sceneCount, totalShots })
   const [messages, setMessages] = useState<Message[]>(() => [
     { role: 'ai', text: greeting },
   ])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
-  const [ideaConfirmed, setIdeaConfirmed] = useState(step > 1)
-  const [styleConfirmed, setStyleConfirmed] = useState(step > 1)
   const bottomRef = useRef<HTMLDivElement>(null)
   const prevStepRef = useRef(step)
+
+  // Context refs (avoid triggering effects on data changes)
+  const ctxRef = useRef({ storyChars, characterCount, sceneCount, totalShots })
+  useEffect(() => {
+    ctxRef.current = { storyChars, characterCount, sceneCount, totalShots }
+  }, [storyChars, characterCount, sceneCount, totalShots])
 
   // Scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Refs for latest context data (avoid triggering effect on data changes)
-  const ctxRef = useRef({ storyChars, characterCount, sceneCount, totalShots })
-
-  useEffect(() => {
-    ctxRef.current = { storyChars, characterCount, sceneCount, totalShots }
-  }, [storyChars, characterCount, sceneCount, totalShots])
-
-  // ── NEW: Merge store chat messages alongside local messages ──
-  // Store messages (from agent WS events) are appended after local messages.
-  // Local messages preserve the Step 1 UX flow (idea/style extraction).
+  // ── Merge local + store chat messages ────────────────────────────
   const allMessages = useMemo(() => {
     const merged: { role: 'user' | 'ai' | 'system'; text: string; id?: string; isStore?: boolean }[] = [...messages]
     if (storeChatMessages && storeChatMessages.length > 0) {
-      // Add store-originated agent messages that aren't already in local messages
       for (const sm of storeChatMessages) {
         const alreadyPresent = merged.some(
           (m) => m.text === sm.content && m.role === (sm.role === 'agent' ? 'ai' : sm.role)
@@ -127,27 +122,82 @@ export default function AIChatPanel({
     return merged
   }, [messages, storeChatMessages])
 
-  // Add context-aware greetings when step advances
+  // Step-advance greeting
   useEffect(() => {
     if (step !== prevStepRef.current && step > 1) {
-      const greeting = buildGreeting(step, ctxRef.current)
-      setMessages(prev => [...prev, { role: 'ai', text: greeting }])
+      const newGreeting = buildGreeting(step, ctxRef.current)
+      setMessages(prev => [...prev, { role: 'ai', text: newGreeting }])
     }
     prevStepRef.current = step
   }, [step])
 
-  // Extract idea from user message (simple heuristic: first substantial message = idea)
-  function extractIdea(text: string): string {
-    // Clean up common conversational prefixes
-    let cleaned = text
-      .replace(/^(我想|我要|我想拍|我想做一个|帮我|请|你好|嗨|hi|hey)\s*/i, '')
-      .replace(/[。！？.!?]$/, '')
-      .trim()
+  // ── V3: Compute pending confirmation state ───────────────────────
+  const pendingConfirmation = pendingConfirmations.length > 0
+    ? pendingConfirmations[pendingConfirmations.length - 1]
+    : null
 
-    if (cleaned.length < 5) cleaned = text.trim()
-    return cleaned
+  // Check if other panel (WorkArea) is actively confirming
+  const workAreaConfirming = syncState.confirmationState.isPending &&
+    lastConfirmationSource === 'WorkArea'
+
+  // ── V3: Confirmation handlers (parity with WorkArea StepActions) ──
+  const handleConfirmAfter = () => {
+    if (!pendingConfirmation) return
+    const stepName = pendingConfirmation.stepName
+    const stepIndex = pendingConfirmation.stepIndex
+
+    // Send confirm via WS or REST fallback
+    if (connectionState === 'connected' && storeSessionId) {
+      sendWsMessage({ type: 'user:confirm', step: stepName })
+    } else if (storeSessionId) {
+      fetch(`/api/pipeline/confirm/${storeSessionId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ step: stepName }),
+      }).catch(() => {})
+    }
+    confirmStep(stepIndex)
   }
 
+  const handleRegenerateAfter = () => {
+    if (!pendingConfirmation) return
+    requestRegenerate(pendingConfirmation.stepIndex)
+    setMessages(prev => [...prev, {
+      role: 'system',
+      text: `🔄 重新生成 ${pendingConfirmation.stepName}...`,
+    }])
+  }
+
+  const handleDiscuss = () => {
+    if (!pendingConfirmation) return
+    const stepLabel = pendingConfirmation.stepName
+    const discussMsg = `我想讨论一下 ${stepLabel} 的结果...`
+    setMessages(prev => [...prev, { role: 'user', text: discussMsg }])
+    if (onWSSendMessage) {
+      onWSSendMessage(discussMsg)
+    }
+  }
+
+  // ── V3: Pre-step confirmation handlers ───────────────────────────
+  const handleConfirmBefore = () => {
+    if (!preStepConfirmData) return
+    respondPreConfirm(preStepConfirmData.stepName, true)
+    setMessages(prev => [...prev, {
+      role: 'system',
+      text: `✅ 已确认执行: ${preStepConfirmData.stepName}`,
+    }])
+  }
+
+  const handleRejectBefore = () => {
+    if (!preStepConfirmData) return
+    respondPreConfirm(preStepConfirmData.stepName, false, '用户取消')
+    setMessages(prev => [...prev, {
+      role: 'system',
+      text: `❌ 已取消: ${preStepConfirmData.stepName}`,
+    }])
+  }
+
+  // ── Send message (no hardcoded extraction — all Agent/WS driven) ──
   async function send() {
     if (!input.trim() || sending) return
     const userMsg = input.trim()
@@ -155,87 +205,39 @@ export default function AIChatPanel({
     setMessages(prev => [...prev, { role: 'user', text: userMsg }])
     setSending(true)
 
-    // ── NEW: Also send via WS when available ──
+    // Send via WS when available
     if (onWSSendMessage) {
       onWSSendMessage(userMsg)
     }
 
     try {
-      // ── Step 1 logic: extract idea and style from conversation ──
-      if (step === 1) {
-        if (!ideaConfirmed) {
-          // First message = idea
-          const extractedIdea = extractIdea(userMsg)
-          onIdeaExtracted(extractedIdea)
-
-          // Check for style in the same message
-          const detectedStyle = extractStyle(userMsg)
-          if (detectedStyle) {
-            onStyleExtracted(detectedStyle)
-            setStyleConfirmed(true)
-          }
-
-          setIdeaConfirmed(true)
-          setMessages(prev => [...prev, {
-            role: 'ai',
-            text: `收到！我理解你想拍：**"${extractedIdea}"**\n\n${detectedStyle
-              ? `我检测到风格倾向：**${styleDisplayName(detectedStyle)}**`
-              : '接下来：你希望短剧是什么**风格**？\n\n可选：🎭 武侠风 · 🏛️ 古风 · 🌆 现代风 · 🔮 悬疑风 · 😂 喜剧风\n\n也可以描述你想要的风格感觉。'}`
-          }])
-        } else if (!styleConfirmed) {
-          // Second message = style
-          const detectedStyle = extractStyle(userMsg)
-          if (detectedStyle) {
-            onStyleExtracted(detectedStyle)
-            setStyleConfirmed(true)
-            setMessages(prev => [...prev, {
-              role: 'ai',
-              text: `好的！风格确认为 **${styleDisplayName(detectedStyle)}** 🎬\n\n一切就绪！确认开始 AI 规划吗？`,
-            }])
-          } else {
-            // Use the text as custom style
-            onStyleExtracted(userMsg)
-            setStyleConfirmed(true)
-            setMessages(prev => [...prev, {
-              role: 'ai',
-              text: `好的！我记录下你的风格偏好：**"${userMsg}"**\n\n一切就绪！确认开始 AI 规划吗？\n\n> 点击下方按钮或回复"开始"`,
-            }])
-          }
-        } else if (userMsg.includes('开始') || userMsg.includes('确认') || userMsg.includes('好') || userMsg.includes('行') || userMsg.includes('可以')) {
-          // User confirmed — trigger planning
-          setMessages(prev => [...prev, {
-            role: 'system', text: '🚀 AI 开始规划中...',
-          }])
-          onStartPlanning()
-        } else {
-          // Continue conversation
-          const reply = onSendMessage ? await onSendMessage(userMsg) : null
-          if (reply) {
-            setMessages(prev => [...prev, { role: 'ai', text: reply }])
-          }
-        }
-      } else {
-        // Steps 2-5: general AI chat
-        const reply = onSendMessage ? await onSendMessage(userMsg) : null
-        if (reply) {
-          setMessages(prev => [...prev, { role: 'ai', text: reply }])
-        } else {
-          setMessages(prev => [...prev, {
-            role: 'ai',
-            text: '收到！你可以直接告诉我想要修改什么，比如"换一个角色名字"或"第3个镜头太暗了"。',
-          }])
-        }
+      // REST fallback for AI reply
+      const reply = onSendMessage ? await onSendMessage(userMsg) : null
+      if (reply) {
+        setMessages(prev => [...prev, { role: 'ai', text: reply }])
       }
     } catch {
-      setMessages(prev => [...prev, { role: 'ai', text: '抱歉，AI 服务暂不可用，请稍后重试。' }])
+      // Silent fallback — WS-driven messages will appear via storeChatMessages
     } finally {
       setSending(false)
     }
   }
 
+  // ── Combined agent suggestions (props + store) ───────────────────
+  const allSuggestions = useMemo(() => {
+    const combined = [...(storeAgentSuggestions ?? [])]
+    for (const s of storeAgentSuggestionsFromStore) {
+      if (!combined.some(c => c.id === s.id)) {
+        combined.push(s)
+      }
+    }
+    return combined
+  }, [storeAgentSuggestions, storeAgentSuggestionsFromStore])
+
+  // ── Render ───────────────────────────────────────────────────────
   return (
     <aside className="w-[380px] border-l border-r bg-sidebar flex-shrink-0 flex flex-col h-full">
-      {/* Header — fixed, no collapse */}
+      {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3.5 border-b bg-sidebar/80 backdrop-blur-sm shrink-0">
         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary">
           <Wand2 className="h-3.5 w-3.5 text-primary-foreground" />
@@ -259,64 +261,131 @@ export default function AIChatPanel({
 
         {sending && <TypingIndicator />}
 
-        {/* Quick reply chips — style selection */}
-        {step === 1 && ideaConfirmed && !styleConfirmed && (
-          <QuickActions
-            showStylePicker
-            onStyleSelect={(styleKey) => {
-              const style = PRESET_STYLES.find((s) => s.key === styleKey)
-              if (!style) return
-              setMessages((prev) => [
-                ...prev,
-                { role: 'user', text: `${style.emoji} ${style.name}` },
-                { role: 'ai', text: `好的！风格确认为 **${style.emoji} ${style.name}** 🎬\n\n一切就绪！确认开始 AI 规划吗？` },
-              ])
-              onStyleExtracted(styleKey)
-              setStyleConfirmed(true)
-            }}
-          />
+        {/* ── V3: Pre-step confirmation (before execution) ────────── */}
+        {preStepConfirmData && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 space-y-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-amber-800">
+                  确认执行: {preStepConfirmData.stepName}
+                </p>
+                <p className="text-xs text-amber-700 mt-1">
+                  预计耗时: {preStepConfirmData.estimatedDuration}
+                </p>
+                {preStepConfirmData.sideEffects.length > 0 && (
+                  <ul className="text-xs text-amber-600 mt-1 list-disc list-inside">
+                    {preStepConfirmData.sideEffects.map((se, i) => (
+                      <li key={i}>{se}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleConfirmBefore}
+                disabled={workAreaConfirming}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
+              >
+                <Play className="h-3 w-3" />
+                确认执行
+              </button>
+              <button
+                onClick={handleRejectBefore}
+                disabled={workAreaConfirming}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border hover:bg-muted transition-colors disabled:opacity-40"
+              >
+                取消
+              </button>
+              {workAreaConfirming && (
+                <span className="text-[10px] text-muted-foreground self-center">
+                  WorkArea 正在确认中...
+                </span>
+              )}
+            </div>
+          </div>
         )}
 
-        {/* Quick reply chips — confirm to start */}
-        {step === 1 && ideaConfirmed && styleConfirmed && (
-          <QuickActions
-            showStartPlanning
-            onStartPlanning={() => {
-              setMessages((prev) => [...prev, { role: 'system', text: '🚀 AI 开始规划中...' }])
-              onStartPlanning()
-            }}
-            onRestartIdea={() => {
-              setIdeaConfirmed(false)
-              setStyleConfirmed(false)
-              onIdeaExtracted('')
-              onStyleExtracted('')
-              setMessages((prev) => [
-                ...prev,
-                { role: 'user', text: '我想换个创意' },
-                { role: 'ai', text: '没问题！请重新描述你想拍的短剧创意 🎬' },
-              ])
-            }}
-          />
+        {/* ── V3: Post-step confirmation (after execution) ────────── */}
+        {pendingConfirmation && pendingConfirmation.phase !== 'before' && (
+          <div className="rounded-xl border border-primary/20 bg-primary-light/50 p-4 space-y-3">
+            <div className="flex items-start gap-2">
+              <CheckCircle className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-medium">
+                  {pendingConfirmation.message || '步骤已完成，请确认'}
+                </p>
+                {pendingConfirmation.suggestions.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {pendingConfirmation.suggestions.map((s, i) => (
+                      <span key={i} className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-2 items-center">
+              <button
+                onClick={handleConfirmAfter}
+                disabled={workAreaConfirming}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
+              >
+                <CheckCircle className="h-3 w-3" />
+                确认，进入下一步
+              </button>
+              <button
+                onClick={handleRegenerateAfter}
+                disabled={workAreaConfirming}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border hover:bg-muted transition-colors disabled:opacity-40"
+              >
+                <RotateCcw className="h-3 w-3" />
+                重新生成
+              </button>
+              <button
+                onClick={handleDiscuss}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border hover:bg-muted transition-colors"
+              >
+                <MessageSquare className="h-3 w-3" />
+                讨论
+              </button>
+              {workAreaConfirming && (
+                <span className="text-[10px] text-muted-foreground">
+                  WorkArea 正在确认中...
+                </span>
+              )}
+            </div>
+          </div>
         )}
 
-        {/* Agent suggestions from store */}
+        {/* ── V3: Agent suggestions (WS-driven quick actions) ─────── */}
         <SuggestionBar
-          suggestions={storeAgentSuggestions ?? []}
+          suggestions={allSuggestions}
+          onAction={(suggestion) => {
+            if (suggestion.action?.type === 'confirm' && onStartPlanning) {
+              setMessages(prev => [...prev, { role: 'system', text: '🚀 AI 开始规划中...' }])
+              onStartPlanning()
+            } else if (suggestion.action?.type === 'navigate') {
+              // Navigation actions are handled by agent:navigate WS event
+            }
+          }}
         />
 
         <div ref={bottomRef} />
       </div>
 
-      {/* Input — always visible */}
+      {/* Input */}
       <ChatInput
         value={input}
         onChange={setInput}
         onSend={send}
         sending={sending}
         placeholder={
-          step === 1 && !ideaConfirmed ? '描述你的创意...' :
-          step === 1 && !styleConfirmed ? '描述你想要的风格...' :
-          '输入你的问题或修改意见...'
+          pendingConfirmation
+            ? '回复确认或提出修改意见...'
+            : '输入你的问题或修改意见...'
         }
       />
     </aside>

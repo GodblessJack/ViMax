@@ -84,7 +84,83 @@ CLIENT_EVENT_TYPES = frozenset({
     "user:message",
     "user:action",
     "ping",
+    # V3: pre-execution confirmation events
+    "user:confirm_before",
+    "user:reject_before",
 })
+
+
+# ── V3 Broadcast helpers ────────────────────────────────────────────────
+
+
+async def broadcast_confirm_before(
+    agent_service,
+    session_id: str,
+    step: str,
+    message: str,
+    context: dict,
+) -> None:
+    """Broadcast step:need_confirm_before to all WS connections for a session."""
+    await agent_service.broadcast(session_id, {
+        "type": "step:need_confirm_before",
+        "step": step,
+        "session_id": session_id,
+        "phase": "before",
+        "message": message,
+        "context": context,
+        "source": "agent",
+    })
+
+
+async def broadcast_pre_step_context(
+    agent_service,
+    session_id: str,
+    step: str,
+    current_progress: dict,
+    available_artifacts: dict,
+    agent_state: dict,
+) -> None:
+    """Broadcast step:pre_step_context to all WS connections for a session."""
+    await agent_service.broadcast(session_id, {
+        "type": "step:pre_step_context",
+        "session_id": session_id,
+        "step": step,
+        "currentProgress": current_progress,
+        "availableArtifacts": available_artifacts,
+        "agentState": agent_state,
+    })
+
+
+async def broadcast_config_changed(
+    agent_service,
+    session_id: str,
+    changed_by: str,
+    source: str,
+    changes: list,
+    timestamp: int,
+) -> None:
+    """Broadcast sync:config_changed to all WS connections for a session."""
+    await agent_service.broadcast(session_id, {
+        "type": "sync:config_changed",
+        "session_id": session_id,
+        "changedBy": changed_by,
+        "source": source,
+        "changes": changes,
+        "timestamp": timestamp,
+    })
+
+
+async def broadcast_confirmation_state(
+    agent_service,
+    session_id: str,
+    state: dict,
+) -> None:
+    """Broadcast sync:confirmation_state to all WS connections for a session."""
+    await agent_service.broadcast(session_id, {
+        "type": "sync:confirmation_state",
+        "session_id": session_id,
+        "state": state,
+    })
 
 
 @router.websocket("/ws/session/{session_id}")
@@ -102,6 +178,8 @@ async def session_websocket(websocket: WebSocket, session_id: str):
       user:navigate -> agent_service.handle_navigate()
       user:action   -> agent_service.handle_action()
       ping          -> pong
+      user:confirm_before -> agent_service.handle_confirm_before()  [V3]
+      user:reject_before  -> agent_service.handle_reject_before()   [V3]
     """
     await websocket.accept()
     psvc = _get_pipeline_service()
@@ -247,6 +325,33 @@ async def _handle_client_event(
             step = payload.get("step", "")
             feedback = payload.get("feedback", "")
             await agent_service.handle_regenerate(session_id, step, feedback)
+
+        # ── V3: Pre-execution confirmation handlers ──────────────────
+        elif event_type == "user:confirm_before":
+            step = payload.get("step", "")
+            user_payload = payload.get("payload", {})
+            reply = payload.get("reply", "")
+            await agent_service.handle_confirm_before(
+                session_id, step, user_payload, reply,
+            )
+            await websocket.send_json({
+                "type": "agent:confirm_ack",
+                "session_id": session_id,
+                "step": step,
+            })
+
+        elif event_type == "user:reject_before":
+            step = payload.get("step", "")
+            user_payload = payload.get("payload", {})
+            reply = payload.get("reply", "")
+            await agent_service.handle_reject_before(
+                session_id, step, user_payload, reply,
+            )
+            await websocket.send_json({
+                "type": "agent:confirm_ack",
+                "session_id": session_id,
+                "step": step,
+            })
 
     except Exception:
         logger.exception("Failed to handle client event %s for session %s", event_type, session_id)

@@ -1,7 +1,7 @@
 // ── Pipeline Event Types (from WebSocket) ─────────────────────────
 
 export type PipelineEvent = {
-  type: 'pipeline_status' | 'artifact_ready' | 'render_progress' | 'pipeline_complete' | 'pipeline_error'
+  type: 'pipeline_status' | 'pipeline:status' | 'artifact_ready' | 'render_progress' | 'pipeline_complete' | 'pipeline:complete' | 'pipeline_error'
   session_id: string
   stage?: string
   phase?: string

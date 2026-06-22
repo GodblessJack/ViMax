@@ -88,7 +88,7 @@ class StylePreset(BaseModel):
 # ── WebSocket events (typed dicts for documentation) ─────────────────
 
 class WsPipelineEvent(BaseModel):
-    type: str  # pipeline_status | artifact_ready | render_progress | pipeline_complete | pipeline_error
+    type: str  # pipeline_status | artifact_ready | render_progress | pipeline:complete | pipeline_error
     session_id: str
     stage: Optional[str] = None
     phase: Optional[str] = None

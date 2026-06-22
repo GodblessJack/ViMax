@@ -372,23 +372,15 @@ class PipelineService:
         request: PipelinePlanRequest,
         cancel_evt: asyncio.Event,
     ) -> None:
-        """Execute the full planning pipeline: story → characters → script → storyboard."""
+        """Orchestrate the full planning pipeline by delegating to sub-step methods.
+
+        Steps: story_generation → character_extraction → script_writing →
+               storyboard_design (parallel per scene)
+        """
         try:
             self._session_index.update_stage(session_id, "narrative_planning", "Planning started")
 
-            chat_model = self._build_chat_model()
-            dummy = _UnavailableGenerator()
-            working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
-            os.makedirs(working_dir, exist_ok=True)
-
-            pipeline = Idea2VideoPipeline(
-                chat_model=chat_model,
-                image_generator=dummy,
-                video_generator=dummy,
-                working_dir=working_dir,
-            )
-
-            # Step 1: Develop story
+            # Step 1: Story generation
             if cancel_evt.is_set():
                 return
             await self._broadcast_ws(session_id, {
@@ -396,111 +388,60 @@ class PipelineService:
                 "stage": "develop_story", "phase": "started",
                 "message": "Developing story from idea...",
             })
-            with _capture_pipeline_output():
-                story = await asyncio.wait_for(
-                    pipeline.develop_story(
-                        idea=request.idea,
-                        user_requirement=request.user_requirement,
-                        quiet=True,
-                    ),
-                    timeout=_STEP_TIMEOUT_STORY,
-                )
-            await self._broadcast_ws(session_id, {
-                "type": "artifact_ready", "session_id": session_id,
-                "path": "idea2video/story.txt",
-                "url": f"/api/files/{session_id}/idea2video/story.txt",
-            })
+            story_result = await self.run_story_generation(
+                session_id=session_id,
+                idea=request.idea,
+                style=request.style,
+                user_requirement=request.user_requirement,
+            )
 
-            # Step 2: Extract characters
+            # Step 2: Character extraction
             if cancel_evt.is_set():
                 return
             await self._broadcast_ws(session_id, {
                 "type": "pipeline_status", "session_id": session_id,
                 "stage": "extract_characters", "phase": "started",
             })
-            with _capture_pipeline_output():
-                characters = await asyncio.wait_for(
-                    pipeline.extract_characters(story=story, quiet=True),
-                    timeout=_STEP_TIMEOUT_CHARACTERS,
-                )
-            await self._broadcast_ws(session_id, {
-                "type": "artifact_ready", "session_id": session_id,
-                "path": "idea2video/characters.json",
-                "url": f"/api/files/{session_id}/idea2video/characters.json",
-            })
+            char_result = await self.run_character_extraction(
+                session_id=session_id,
+            )
 
-            # Step 3: Write script
+            # Step 3: Script writing
             if cancel_evt.is_set():
                 return
             await self._broadcast_ws(session_id, {
                 "type": "pipeline_status", "session_id": session_id,
                 "stage": "write_script", "phase": "started",
             })
-            with _capture_pipeline_output():
-                scene_scripts = await asyncio.wait_for(
-                    pipeline.write_script_based_on_story(
-                        story=story,
-                        user_requirement=request.user_requirement,
-                        quiet=True,
-                    ),
-                    timeout=_STEP_TIMEOUT_SCRIPT,
-                )
-            await self._broadcast_ws(session_id, {
-                "type": "artifact_ready", "session_id": session_id,
-                "path": "idea2video/script.json",
-                "url": f"/api/files/{session_id}/idea2video/script.json",
-            })
+            script_result = await self.run_script_writing(
+                session_id=session_id,
+                user_requirement=request.user_requirement,
+            )
+            scene_scripts = script_result.get("scene_scripts", [])
 
-            # Step 4: Plan text artifacts per scene (parallel — scenes are independent)
-            async def _plan_scene(idx: int, scene_script):
+            # Step 4: Storyboard design per scene (parallel — scenes are independent)
+            async def _plan_scene(idx: int):
                 if cancel_evt.is_set():
                     return None
-                scene_dir = os.path.join(working_dir, f"scene_{idx}")
-                os.makedirs(scene_dir, exist_ok=True)
-
-                if isinstance(scene_script, dict):
-                    script_text = json.dumps(scene_script)
-                else:
-                    script_text = str(scene_script)
-
-                sp = Script2VideoPipeline(
-                    chat_model=chat_model,
-                    image_generator=dummy,
-                    video_generator=dummy,
-                    working_dir=scene_dir,
-                )
                 await self._broadcast_ws(session_id, {
                     "type": "pipeline_status", "session_id": session_id,
                     "stage": f"plan_scene_{idx}", "phase": "started",
                     "message": f"Planning scene {idx + 1}/{len(scene_scripts)}...",
                 })
-                with _capture_pipeline_output():
-                    await asyncio.wait_for(
-                        sp.plan_text_artifacts(
-                            script=script_text,
-                            user_requirement=request.user_requirement,
-                            style=request.style,
-                            characters=characters,
-                            progress=self._ws_progress_callback(session_id),
-                            quiet=True,
-                        ),
-                        timeout=_STEP_TIMEOUT_SCENE_PLAN,
-                    )
-                await self._broadcast_ws(session_id, {
-                    "type": "artifact_ready", "session_id": session_id,
-                    "path": f"idea2video/scene_{idx}/storyboard.json",
-                    "url": f"/api/files/{session_id}/idea2video/scene_{idx}/storyboard.json",
-                })
+                await self.run_storyboard_scene(
+                    session_id=session_id,
+                    scene_index=idx,
+                    user_requirement=request.user_requirement,
+                    style=request.style,
+                )
                 return idx
 
-            await asyncio.gather(*[
-                _plan_scene(idx, scene_script)
-                for idx, scene_script in enumerate(scene_scripts)
-            ])
+            if not cancel_evt.is_set():
+                await asyncio.gather(*[_plan_scene(i) for i in range(len(scene_scripts))])
 
             self._session_index.update_stage(session_id, "narrative_planned", "Planning complete")
             await self._broadcast_ws(session_id, {
-                "type": "pipeline_complete", "session_id": session_id,
+                "type": "pipeline:complete", "session_id": session_id,
                 "stage": "narrative_planned",
                 "message": "Planning complete. Ready for rendering.",
             })
@@ -764,7 +705,7 @@ class PipelineService:
         self._session_index.update_stage(session_id, "narrative_planned", "Planning complete (mock)")
 
         await self._broadcast_ws(session_id, {
-            "type": "pipeline_complete", "session_id": session_id,
+            "type": "pipeline:complete", "session_id": session_id,
             "stage": "narrative_planned",
             "message": "Planning complete. Ready for rendering.",
         })
@@ -813,137 +754,49 @@ class PipelineService:
         session_id: str,
         cancel_evt: asyncio.Event,
     ) -> None:
-        """Execute full rendering: character portraits → frames → video."""
+        """Orchestrate the full rendering pipeline by delegating to sub-step methods.
+
+        Steps: character_portraits → video_rendering (all scenes).
+        """
         try:
             self._session_index.update_stage(session_id, "rendering", "Rendering started")
 
-            chat_model = self._build_chat_model(multimodal=True)
-            image_gen = self._build_image_generator()
-            video_gen = self._build_video_generator()
-            working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
-
-            pipeline = Idea2VideoPipeline(
-                chat_model=chat_model,
-                image_generator=image_gen,
-                video_generator=video_gen,
-                working_dir=working_dir,
-            )
-
-            # Load characters
-            chars_path = os.path.join(working_dir, "characters.json")
-            if not os.path.exists(chars_path):
-                raise FileNotFoundError(f"characters.json not found — run planning first")
-            with open(chars_path, "r") as f:
-                characters_data = json.load(f)
-
-            from interfaces.character import CharacterInScene
-            characters = [CharacterInScene.model_validate(c) for c in characters_data]
-
+            # Step 5: Character portraits (all characters)
             if cancel_evt.is_set():
                 return
-
-            # Generate character portraits
             await self._broadcast_ws(session_id, {
                 "type": "pipeline_status", "session_id": session_id,
                 "stage": "character_portraits", "phase": "started",
-                "message": f"Generating portraits for {len(characters)} characters...",
+                "message": "Generating character portraits...",
             })
-            session = self._session_index.get(session_id)
-            style_val = (session or {}).get("style", "")
-            with _capture_pipeline_output():
-                character_portraits_registry = await asyncio.wait_for(
-                    pipeline.generate_character_portraits(
-                        characters=characters,
-                        character_portraits_registry=None,
-                        style=style_val,
-                    ),
-                    timeout=_STEP_TIMEOUT_CHARACTERS,
-                )
-            for c in characters:
-                for view in ["front", "side", "back"]:
-                    img_path = os.path.join(
-                        working_dir, "character_portraits",
-                        f"{c.idx}_{c.identifier_in_scene or 'unknown'}",
-                        f"{view}.png",
-                    )
-                    if os.path.exists(img_path):
-                        await self._broadcast_ws(session_id, {
-                            "type": "render_progress",
-                            "session_id": session_id,
-                            "stage": "character_portrait", "phase": "done",
-                            "character": c.identifier_in_scene,
-                            "view": view,
-                            "image_url": f"/api/files/{session_id}/idea2video/character_portraits/{c.idx}_{c.identifier_in_scene or 'unknown'}/{view}.png",
-                        })
+            portrait_result = await self.run_character_portrait(
+                session_id=session_id,
+            )
 
             if cancel_evt.is_set():
                 return
 
-            # Load scene scripts
-            script_path = os.path.join(working_dir, "script.json")
-            if not os.path.exists(script_path):
-                raise FileNotFoundError(f"script.json not found — run planning first")
-            with open(script_path, "r") as f:
-                scene_scripts = json.load(f)
+            # Step 6: Video rendering (all scenes)
+            await self._broadcast_ws(session_id, {
+                "type": "pipeline_status", "session_id": session_id,
+                "stage": "render_scenes", "phase": "started",
+                "message": "Rendering all scenes...",
+            })
+            video_result = await self.run_video_scene(
+                session_id=session_id,
+            )
 
-            # Read session data once before scene loop (avoid repeated disk I/O)
-            session_data = self._session_index.get(session_id) or {}
-            user_req = session_data.get("user_requirement", "")
-            style_val2 = session_data.get("style", "")
-
-            # Render each scene
-            for idx, scene_script in enumerate(scene_scripts):
-                if cancel_evt.is_set():
-                    return
-                scene_dir = os.path.join(working_dir, f"scene_{idx}")
-                os.makedirs(scene_dir, exist_ok=True)
-
-                script_text = json.dumps(scene_script) if isinstance(scene_script, dict) else str(scene_script)
-
-                sp = Script2VideoPipeline(
-                    chat_model=chat_model,
-                    image_generator=image_gen,
-                    video_generator=video_gen,
-                    working_dir=scene_dir,
-                )
-                await self._broadcast_ws(session_id, {
-                    "type": "pipeline_status", "session_id": session_id,
-                    "stage": f"render_scene_{idx}", "phase": "started",
-                    "message": f"Rendering scene {idx + 1}/{len(scene_scripts)}...",
-                })
-                with _capture_pipeline_output():
-                    await asyncio.wait_for(
-                        sp(
-                            script=script_text,
-                            user_requirement=user_req,
-                            style=style_val2,
-                            characters=characters,
-                            character_portraits_registry=character_portraits_registry,
-                            progress=self._ws_progress_callback(session_id),
-                            quiet=True,
-                        ),
-                        timeout=_STEP_TIMEOUT_SCENE_RENDER,
-                    )
-
-            # Final video exists check
-            final_path = os.path.join(working_dir, "final_video.mp4")
-            if os.path.exists(final_path):
+            # Final status check
+            final_url = video_result.get("final_video_url")
+            if final_url:
                 self._session_index.update_stage(session_id, "rendered", "Rendering complete")
                 await self._broadcast_ws(session_id, {
-                    "type": "pipeline_complete", "session_id": session_id,
+                    "type": "pipeline:complete", "session_id": session_id,
                     "stage": "rendered",
-                    "final_video_url": f"/api/files/{session_id}/idea2video/final_video.mp4",
+                    "final_video_url": final_url,
                 })
             else:
                 self._session_index.update_stage(session_id, "rendered", "Rendering complete (no concat)")
-                # Try scene 0 video
-                scene0_video = os.path.join(working_dir, "scene_0", "final_video.mp4")
-                if os.path.exists(scene0_video):
-                    await self._broadcast_ws(session_id, {
-                        "type": "pipeline_complete", "session_id": session_id,
-                        "stage": "rendered",
-                        "final_video_url": f"/api/files/{session_id}/idea2video/scene_0/final_video.mp4",
-                    })
 
             # Rendering succeeded — clear circuit-breaker failure history
             self._render_failures.pop(session_id, None)
@@ -980,6 +833,507 @@ class PipelineService:
                 "type": "pipeline_error", "session_id": session_id,
                 "error": friendly,
             })
+
+    # ── V3 Public sub-step methods ──────────────────────────────────────
+
+    async def run_story_generation(
+        self,
+        session_id: str,
+        idea: str,
+        style: str,
+        user_requirement: str = "",
+        progress_callback: Callable | None = None,
+    ) -> dict[str, Any]:
+        """Execute ONLY story generation. Does NOT run subsequent steps.
+
+        Broadcasts step:running with granular progress and artifact_ready
+        when the story file is written.
+
+        Returns:
+            {"status": "ok", "artifacts": ["idea2video/story.txt"], "story": "..."}
+        """
+        chat_model = self._build_chat_model()
+        dummy = _UnavailableGenerator()
+        working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
+        os.makedirs(working_dir, exist_ok=True)
+
+        pipeline = Idea2VideoPipeline(
+            chat_model=chat_model,
+            image_generator=dummy,
+            video_generator=dummy,
+            working_dir=working_dir,
+        )
+
+        await self._broadcast_ws(session_id, {
+            "type": "step:running",
+            "step": "story_generation",
+            "progress_percent": 10,
+            "progress_message": "正在构思故事...",
+        })
+
+        with _capture_pipeline_output():
+            story = await asyncio.wait_for(
+                pipeline.develop_story(
+                    idea=idea,
+                    user_requirement=user_requirement,
+                    quiet=True,
+                ),
+                timeout=_STEP_TIMEOUT_STORY,
+            )
+
+        await self._broadcast_ws(session_id, {
+            "type": "step:running",
+            "step": "story_generation",
+            "progress_percent": 90,
+            "progress_message": "故事生成完毕，正在保存...",
+        })
+
+        await self._broadcast_ws(session_id, {
+            "type": "artifact_ready",
+            "session_id": session_id,
+            "path": "idea2video/story.txt",
+            "url": f"/api/files/{session_id}/idea2video/story.txt",
+        })
+
+        return {
+            "status": "ok",
+            "artifacts": ["idea2video/story.txt"],
+            "story": story,
+        }
+
+    async def run_character_extraction(
+        self,
+        session_id: str,
+        progress_callback: Callable | None = None,
+    ) -> dict[str, Any]:
+        """Execute ONLY character extraction. Reads story.txt from working dir.
+
+        Broadcasts step:running with granular progress and artifact_ready
+        when the characters file is written.
+
+        Returns:
+            {"status": "ok", "artifacts": ["idea2video/characters.json"], "characters": [...]}
+        """
+        working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
+        story_path = os.path.join(working_dir, "story.txt")
+        if not os.path.exists(story_path):
+            raise FileNotFoundError(
+                f"story.txt not found — run story_generation first"
+            )
+        with open(story_path, "r", encoding="utf-8") as f:
+            story = f.read()
+
+        chat_model = self._build_chat_model()
+        dummy = _UnavailableGenerator()
+        pipeline = Idea2VideoPipeline(
+            chat_model=chat_model,
+            image_generator=dummy,
+            video_generator=dummy,
+            working_dir=working_dir,
+        )
+
+        await self._broadcast_ws(session_id, {
+            "type": "step:running",
+            "step": "character_extraction",
+            "progress_percent": 10,
+            "progress_message": "正在提取角色...",
+        })
+
+        with _capture_pipeline_output():
+            characters = await asyncio.wait_for(
+                pipeline.extract_characters(story=story, quiet=True),
+                timeout=_STEP_TIMEOUT_CHARACTERS,
+            )
+
+        await self._broadcast_ws(session_id, {
+            "type": "artifact_ready",
+            "session_id": session_id,
+            "path": "idea2video/characters.json",
+            "url": f"/api/files/{session_id}/idea2video/characters.json",
+        })
+
+        return {
+            "status": "ok",
+            "artifacts": ["idea2video/characters.json"],
+            "characters": characters,
+        }
+
+    async def run_script_writing(
+        self,
+        session_id: str,
+        user_requirement: str = "",
+        progress_callback: Callable | None = None,
+    ) -> dict[str, Any]:
+        """Execute ONLY script writing. Reads story.txt from working dir.
+
+        Broadcasts step:running with granular progress and artifact_ready
+        when the script file is written.
+
+        Returns:
+            {"status": "ok", "artifacts": ["idea2video/script.json"], "scene_scripts": [...]}
+        """
+        working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
+        story_path = os.path.join(working_dir, "story.txt")
+        if not os.path.exists(story_path):
+            raise FileNotFoundError(
+                f"story.txt not found — run story_generation first"
+            )
+        with open(story_path, "r", encoding="utf-8") as f:
+            story = f.read()
+
+        chat_model = self._build_chat_model()
+        dummy = _UnavailableGenerator()
+        pipeline = Idea2VideoPipeline(
+            chat_model=chat_model,
+            image_generator=dummy,
+            video_generator=dummy,
+            working_dir=working_dir,
+        )
+
+        await self._broadcast_ws(session_id, {
+            "type": "step:running",
+            "step": "script_writing",
+            "progress_percent": 10,
+            "progress_message": "正在编写剧本...",
+        })
+
+        with _capture_pipeline_output():
+            scene_scripts = await asyncio.wait_for(
+                pipeline.write_script_based_on_story(
+                    story=story,
+                    user_requirement=user_requirement,
+                    quiet=True,
+                ),
+                timeout=_STEP_TIMEOUT_SCRIPT,
+            )
+
+        await self._broadcast_ws(session_id, {
+            "type": "artifact_ready",
+            "session_id": session_id,
+            "path": "idea2video/script.json",
+            "url": f"/api/files/{session_id}/idea2video/script.json",
+        })
+
+        return {
+            "status": "ok",
+            "artifacts": ["idea2video/script.json"],
+            "scene_scripts": scene_scripts,
+        }
+
+    async def run_storyboard_scene(
+        self,
+        session_id: str,
+        scene_index: int,
+        user_requirement: str = "",
+        style: str = "",
+        progress_callback: Callable | None = None,
+    ) -> dict[str, Any]:
+        """Execute storyboard design for a SINGLE scene.
+
+        Reads script.json and characters.json from the working directory
+        and produces the storyboard artifact for the specified scene.
+
+        Broadcasts step:running with per-scene progress and artifact_ready.
+
+        Returns:
+            {"status": "ok", "artifacts": ["idea2video/scene_N/storyboard.json"], "scene_index": N}
+        """
+        working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
+
+        # Load scene script for the requested index
+        script_path = os.path.join(working_dir, "script.json")
+        if not os.path.exists(script_path):
+            raise FileNotFoundError(
+                f"script.json not found — run script_writing first"
+            )
+        with open(script_path, "r", encoding="utf-8") as f:
+            scene_scripts = json.load(f)
+
+        if not isinstance(scene_scripts, list) or scene_index >= len(scene_scripts):
+            raise ValueError(
+                f"Scene index {scene_index} out of range "
+                f"(0-{len(scene_scripts) - 1 if isinstance(scene_scripts, list) else 0})"
+            )
+
+        scene_script = scene_scripts[scene_index]
+        total_scenes = len(scene_scripts)
+
+        # Load characters
+        chars_path = os.path.join(working_dir, "characters.json")
+        characters = []
+        if os.path.exists(chars_path):
+            with open(chars_path, "r", encoding="utf-8") as f:
+                characters = json.load(f)
+
+        scene_dir = os.path.join(working_dir, f"scene_{scene_index}")
+        os.makedirs(scene_dir, exist_ok=True)
+
+        chat_model = self._build_chat_model()
+        dummy = _UnavailableGenerator()
+
+        script_text = (
+            json.dumps(scene_script) if isinstance(scene_script, dict)
+            else str(scene_script)
+        )
+
+        sp = Script2VideoPipeline(
+            chat_model=chat_model,
+            image_generator=dummy,
+            video_generator=dummy,
+            working_dir=scene_dir,
+        )
+
+        await self._broadcast_ws(session_id, {
+            "type": "step:running",
+            "step": "storyboard_design",
+            "progress_percent": int((scene_index + 1) / total_scenes * 100),
+            "progress_message": (
+                f"正在设计场景 {scene_index + 1}/{total_scenes} 的分镜..."
+            ),
+        })
+
+        with _capture_pipeline_output():
+            await asyncio.wait_for(
+                sp.plan_text_artifacts(
+                    script=script_text,
+                    user_requirement=user_requirement,
+                    style=style,
+                    characters=characters,
+                    progress=self._ws_progress_callback(session_id),
+                    quiet=True,
+                ),
+                timeout=_STEP_TIMEOUT_SCENE_PLAN,
+            )
+
+        await self._broadcast_ws(session_id, {
+            "type": "artifact_ready",
+            "session_id": session_id,
+            "path": f"idea2video/scene_{scene_index}/storyboard.json",
+            "url": f"/api/files/{session_id}/idea2video/scene_{scene_index}/storyboard.json",
+        })
+
+        return {
+            "status": "ok",
+            "artifacts": [f"idea2video/scene_{scene_index}/storyboard.json"],
+            "scene_index": scene_index,
+        }
+
+    async def run_character_portrait(
+        self,
+        session_id: str,
+        character_index: int | None = None,
+        progress_callback: Callable | None = None,
+    ) -> dict[str, Any]:
+        """Generate character portraits.
+
+        If character_index is None: generate ALL characters.
+        If character_index is provided: generate ONLY that character.
+
+        Broadcasts step:running with granular progress and per-character
+        render_progress events for each generated portrait view.
+
+        Returns:
+            {"status": "ok", "portraits": [{"character_name": ..., "character_id": ...}, ...]}
+        """
+        working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
+
+        # Load characters
+        chars_path = os.path.join(working_dir, "characters.json")
+        if not os.path.exists(chars_path):
+            raise FileNotFoundError(
+                f"characters.json not found — run planning first"
+            )
+        with open(chars_path, "r", encoding="utf-8") as f:
+            characters_data = json.load(f)
+
+        from interfaces.character import CharacterInScene
+        all_characters = [CharacterInScene.model_validate(c) for c in characters_data]
+
+        if character_index is not None:
+            if character_index >= len(all_characters):
+                raise ValueError(
+                    f"Character index {character_index} out of range "
+                    f"(0-{len(all_characters) - 1})"
+                )
+            characters = [all_characters[character_index]]
+        else:
+            characters = all_characters
+
+        chat_model = self._build_chat_model(multimodal=True)
+        image_gen = self._build_image_generator()
+        video_gen = self._build_video_generator()
+
+        pipeline = Idea2VideoPipeline(
+            chat_model=chat_model,
+            image_generator=image_gen,
+            video_generator=video_gen,
+            working_dir=working_dir,
+        )
+
+        session = self._session_index.get(session_id)
+        style_val = (session or {}).get("style", "")
+
+        await self._broadcast_ws(session_id, {
+            "type": "step:running",
+            "step": "character_portraits",
+            "progress_percent": 10,
+            "progress_message": (
+                f"正在为 {len(characters)} 个角色生成肖像..."
+            ),
+        })
+
+        with _capture_pipeline_output():
+            character_portraits_registry = await asyncio.wait_for(
+                pipeline.generate_character_portraits(
+                    characters=characters,
+                    character_portraits_registry=None,
+                    style=style_val,
+                ),
+                timeout=_STEP_TIMEOUT_CHARACTERS,
+            )
+
+        # Broadcast per-character portrait images
+        for c in characters:
+            for view in ["front", "side", "back"]:
+                img_path = os.path.join(
+                    working_dir, "character_portraits",
+                    f"{c.idx}_{c.identifier_in_scene or 'unknown'}",
+                    f"{view}.png",
+                )
+                if os.path.exists(img_path):
+                    await self._broadcast_ws(session_id, {
+                        "type": "render_progress",
+                        "session_id": session_id,
+                        "stage": "character_portrait", "phase": "done",
+                        "character": c.identifier_in_scene,
+                        "view": view,
+                        "image_url": (
+                            f"/api/files/{session_id}/idea2video/"
+                            f"character_portraits/{c.idx}_"
+                            f"{c.identifier_in_scene or 'unknown'}/{view}.png"
+                        ),
+                    })
+
+        return {
+            "status": "ok",
+            "portraits": [
+                {
+                    "character_name": c.identifier_in_scene,
+                    "character_id": c.idx,
+                }
+                for c in characters
+            ],
+        }
+
+    async def run_video_scene(
+        self,
+        session_id: str,
+        scene_index: int | None = None,
+        progress_callback: Callable | None = None,
+    ) -> dict[str, Any]:
+        """Render video for one or all scenes.
+
+        If scene_index is None: render ALL scenes sequentially.
+        If scene_index is provided: render ONLY that scene.
+
+        Broadcasts step:running with per-scene granular progress.
+
+        Returns:
+            {"status": "ok", "scenes_rendered": [0, 1, ...], "final_video_url": "..."}
+        """
+        working_dir = str(self._session_index.working_dir(session_id) / "idea2video")
+
+        # Load scene scripts
+        script_path = os.path.join(working_dir, "script.json")
+        if not os.path.exists(script_path):
+            raise FileNotFoundError(
+                f"script.json not found — run planning first"
+            )
+        with open(script_path, "r", encoding="utf-8") as f:
+            scene_scripts = json.load(f)
+
+        # Load characters
+        chars_path = os.path.join(working_dir, "characters.json")
+        with open(chars_path, "r", encoding="utf-8") as f:
+            characters_data = json.load(f)
+
+        from interfaces.character import CharacterInScene
+        characters = [CharacterInScene.model_validate(c) for c in characters_data]
+
+        chat_model = self._build_chat_model(multimodal=True)
+        image_gen = self._build_image_generator()
+        video_gen = self._build_video_generator()
+
+        session_data = self._session_index.get(session_id) or {}
+        user_req = session_data.get("user_requirement", "")
+        style_val = session_data.get("style", "")
+
+        if scene_index is not None:
+            indices = [scene_index]
+        else:
+            indices = list(range(len(scene_scripts)))
+
+        rendered = []
+        for idx in indices:
+            if idx >= len(scene_scripts):
+                continue
+            scene_script = scene_scripts[idx]
+            scene_dir = os.path.join(working_dir, f"scene_{idx}")
+            os.makedirs(scene_dir, exist_ok=True)
+
+            script_text = (
+                json.dumps(scene_script) if isinstance(scene_script, dict)
+                else str(scene_script)
+            )
+
+            sp = Script2VideoPipeline(
+                chat_model=chat_model,
+                image_generator=image_gen,
+                video_generator=video_gen,
+                working_dir=scene_dir,
+            )
+
+            await self._broadcast_ws(session_id, {
+                "type": "step:running",
+                "step": "video_rendering",
+                "progress_percent": int((idx + 1) / len(indices) * 100),
+                "progress_message": (
+                    f"正在渲染场景 {idx + 1}/{len(indices)}..."
+                ),
+            })
+
+            with _capture_pipeline_output():
+                await asyncio.wait_for(
+                    sp(
+                        script=script_text,
+                        user_requirement=user_req,
+                        style=style_val,
+                        characters=characters,
+                        character_portraits_registry=None,
+                        progress=self._ws_progress_callback(session_id),
+                        quiet=True,
+                    ),
+                    timeout=_STEP_TIMEOUT_SCENE_RENDER,
+                )
+            rendered.append(idx)
+
+        # Check for final video
+        final_video_url = None
+        final_path = os.path.join(working_dir, "final_video.mp4")
+        if os.path.exists(final_path):
+            final_video_url = f"/api/files/{session_id}/idea2video/final_video.mp4"
+        else:
+            scene0_video = os.path.join(working_dir, "scene_0", "final_video.mp4")
+            if os.path.exists(scene0_video):
+                final_video_url = (
+                    f"/api/files/{session_id}/idea2video/scene_0/final_video.mp4"
+                )
+
+        return {
+            "status": "ok",
+            "scenes_rendered": rendered,
+            "final_video_url": final_video_url,
+        }
 
     # ── Public API: cancel ────────────────────────────────────────────
 

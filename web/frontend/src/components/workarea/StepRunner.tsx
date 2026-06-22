@@ -2,6 +2,7 @@ import { Suspense, useMemo } from 'react'
 import type { WorkflowStep, WorkflowStepName } from '@/stores/types'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { STEP_RESULT_COMPONENTS } from './panels/index'
+import { ConfirmationGateBase } from '@/components/shared/ConfirmationGateBase'
 
 /**
  * Resolve the best available data for a step's result panel.
@@ -109,8 +110,37 @@ function _resolvePreview(stepName: WorkflowStepName, previewData: unknown): unkn
 
 export function StepRunner({ step }: { step: WorkflowStep }) {
   const runtime = useWorkflowStore((s) => s.runtime[step.name])
+  // ── V3: Confirmation Gate integrations ──────────────────────────
+  const preStepConfirmData = useWorkflowStore((s) => s.preStepConfirmData)
+  const pendingConfirmations = useWorkflowStore((s) => s.pendingConfirmations)
+  const lastConfirmationSource = useWorkflowStore((s) => s.lastConfirmationSource)
+  const respondPreConfirm = useWorkflowStore((s) => s.respondPreConfirm)
+  const confirmStep = useWorkflowStore((s) => s.confirmStep)
+  const requestRegenerate = useWorkflowStore((s) => s.requestRegenerate)
+  const requestModify = useWorkflowStore((s) => s.requestModify)
+  const sendWsMessage = useWorkflowStore((s) => s.sendWsMessage)
+  const sessionId = useWorkflowStore((s) => s.sessionId)
+  const connectionState = useWorkflowStore((s) => s.connectionState)
 
   if (!runtime) return null
+
+  // ── V3: Compute pending states ──────────────────────────────────
+  // Pre-confirmation: step is preparing AND agent has broadcast need_confirm_before
+  const hasPreConfirm =
+    runtime.phase === 'preparing' &&
+    preStepConfirmData !== null &&
+    preStepConfirmData.stepName === step.name
+
+  // Post-confirmation: step is done AND a pending confirmation exists for this step
+  const postConfirm = pendingConfirmations.find(
+    (pc) => pc.stepName === step.name
+  )
+  const hasPostConfirm = runtime.phase === 'done' && !!postConfirm && !runtime.error
+
+  // Disabled when the OTHER panel is handling the confirmation
+  const otherPanelConfirming =
+    lastConfirmationSource !== null &&
+    lastConfirmationSource !== 'WorkArea'
 
   return (
     <div className="step-runner flex-1 overflow-y-auto p-4">
@@ -160,6 +190,38 @@ export function StepRunner({ step }: { step: WorkflowStep }) {
         </div>
       )}
 
+      {/* ── V3: Pre-exec Confirmation Gate ───────────────────────── */}
+      {hasPreConfirm && (
+        <ConfirmationGateBase
+          mode="pre"
+          stepName={step.name}
+          stepIndex={step.index}
+          message={preStepConfirmData.sideEffects?.join('; ') || `即将开始 ${step.label}`}
+          suggestions={['确认执行', '修改后执行', '取消']}
+          source="WorkArea"
+          preStepContext={preStepConfirmData}
+          isPending={true}
+          disabled={otherPanelConfirming}
+          lastConfirmationSource={lastConfirmationSource}
+          onConfirm={() => {
+            // Accept pre-confirmation: tell agent to proceed
+            respondPreConfirm(step.name, true, '')
+          }}
+          onModify={(_feedback, changes) => {
+            // Reject with modified params
+            respondPreConfirm(step.name, false, _feedback, changes)
+          }}
+          onRegenerate={(_feedback) => {
+            // Treat as reject-with-modify
+            respondPreConfirm(step.name, false, _feedback)
+          }}
+          onCancel={() => {
+            // Cancel/dismiss the pre-confirmation
+            respondPreConfirm(step.name, false, '用户取消了预确认')
+          }}
+        />
+      )}
+
       {/* Phase: Running */}
       {runtime.phase === 'running' && (
         <div className="running-panel space-y-3">
@@ -198,6 +260,62 @@ export function StepRunner({ step }: { step: WorkflowStep }) {
       {/* Phase: Done — Success state */}
       {runtime.phase === 'done' && !runtime.error && (
         <DoneSuccessPanel step={step} runtime={runtime} />
+      )}
+
+      {/* ── V3: Post-exec Confirmation Gate ──────────────────────── */}
+      {hasPostConfirm && (
+        <ConfirmationGateBase
+          mode="post"
+          stepName={step.name}
+          stepIndex={step.index}
+          message={postConfirm.message}
+          suggestions={postConfirm.suggestions}
+          source="WorkArea"
+          stepResult={runtime.result ?? undefined}
+          isPending={true}
+          disabled={otherPanelConfirming}
+          lastConfirmationSource={lastConfirmationSource}
+          onConfirm={() => {
+            // Confirm the step — delegate to store action
+            confirmStep(step.index)
+            if (connectionState === 'connected') {
+              sendWsMessage({ type: 'user:confirm', step: step.name })
+            } else {
+              fetch(`/api/pipeline/confirm/${sessionId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ step: step.name }),
+              }).catch(() => {})
+            }
+          }}
+          onModify={(_feedback, changes) => {
+            // Request modification
+            requestModify(step.index, changes ?? {})
+            if (connectionState === 'connected') {
+              sendWsMessage({
+                type: 'user:modify',
+                step: step.name,
+                changes: changes ?? {},
+                feedback: _feedback,
+              })
+            }
+          }}
+          onRegenerate={(_feedback) => {
+            // Request regeneration
+            requestRegenerate(step.index, _feedback)
+            if (connectionState === 'connected') {
+              sendWsMessage({
+                type: 'user:regenerate',
+                step: step.name,
+                feedback: _feedback,
+              })
+            }
+          }}
+          onCancel={() => {
+            // Dismiss the confirmation without action
+            useWorkflowStore.getState().setPendingConfirmation(null)
+          }}
+        />
       )}
     </div>
   )

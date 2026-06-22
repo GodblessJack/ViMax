@@ -1,6 +1,13 @@
 import type { WorkflowStep } from '@/stores/types'
 import { useWorkflowStore } from '@/stores/workflowStore'
 
+/**
+ * StepActions — bottom action bar for the current workflow step.
+ *
+ * V3: When ConfirmationGate is active in StepRunner (pre or post mode),
+ * confirm/modify/regenerate buttons are delegated to the gate.
+ * StepActions only shows auxiliary buttons: nav, discuss, error actions.
+ */
 export function StepActions({ step }: { step: WorkflowStep }) {
   const currentStepIndex = useWorkflowStore((s) => s.currentStepIndex)
   const confirmedSteps = useWorkflowStore((s) => s.confirmedSteps)
@@ -11,6 +18,23 @@ export function StepActions({ step }: { step: WorkflowStep }) {
   const sendWsMessage = useWorkflowStore((s) => s.sendWsMessage)
   const sessionId = useWorkflowStore((s) => s.sessionId)
   const connectionState = useWorkflowStore((s) => s.connectionState)
+
+  // ── V3: Check if ConfirmationGate is handling confirm/modify/regenerate ──
+  const preStepConfirmData = useWorkflowStore((s) => s.preStepConfirmData)
+  const pendingConfirmations = useWorkflowStore((s) => s.pendingConfirmations)
+
+  const hasPreGate =
+    runtime?.phase === 'preparing' &&
+    preStepConfirmData !== null &&
+    preStepConfirmData.stepName === step.name
+
+  const hasPostGate =
+    runtime?.phase === 'done' &&
+    pendingConfirmations.some((pc) => pc.stepName === step.name) &&
+    !runtime?.error
+
+  // When ConfirmationGate handles confirmation, StepActions delegates to it
+  const gateActive = hasPreGate || hasPostGate
 
   const isDone = runtime?.phase === 'done'
   const isError = !!runtime?.error
@@ -47,26 +71,38 @@ export function StepActions({ step }: { step: WorkflowStep }) {
         </button>
       )}
 
-      {/* Confirm */}
-      {step.requiresConfirmation && !isConfirmed && !isError && (
-        <button
-          onClick={doConfirm}
-          className="px-6 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors font-medium"
-        >
-          确认，进入下一步
-        </button>
+      {/* ── V3: Delegated to ConfirmationGate when gate is active ── */}
+      {!gateActive && (
+        <>
+          {/* Confirm */}
+          {step.requiresConfirmation && !isConfirmed && !isError && (
+            <button
+              onClick={doConfirm}
+              className="px-6 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors font-medium"
+            >
+              确认，进入下一步
+            </button>
+          )}
+
+          {/* Regenerate */}
+          {!isError && (
+            <button
+              onClick={() => {
+                requestRegenerate(step.index)
+              }}
+              className="px-4 py-2 text-sm rounded-lg border hover:bg-muted transition-colors"
+            >
+              重新生成
+            </button>
+          )}
+        </>
       )}
 
-      {/* Regenerate */}
-      {!isError && (
-        <button
-          onClick={() => {
-            requestRegenerate(step.index)
-          }}
-          className="px-4 py-2 text-sm rounded-lg border hover:bg-muted transition-colors"
-        >
-          重新生成
-        </button>
+      {/* ── V3: Gate-active indicator ── */}
+      {gateActive && (
+        <p className="text-xs text-muted-foreground italic">
+          请在上方确认区完成操作
+        </p>
       )}
 
       {/* Error retry */}
