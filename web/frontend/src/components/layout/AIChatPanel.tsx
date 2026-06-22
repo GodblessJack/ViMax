@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Wand2, CheckCircle, RotateCcw, MessageSquare, AlertTriangle, Play, PenLine } from 'lucide-react'
+import { Wand2, CheckCircle, RotateCcw, MessageSquare } from 'lucide-react'
 import type { WizardStep } from '@/lib/types'
 import type { ChatMessage as StoreChatMessage, AgentSuggestion } from '@/stores/types'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { ChatMessage, TypingIndicator } from '@/components/ui/ChatMessage'
 import { ChatInput, SuggestionBar } from '@/components/layout/chat'
+import ConfirmationGateInline from '@/components/shared/ConfirmationGateInline'
 
 type Message = { role: 'user' | 'ai' | 'system'; text: string }
 
@@ -87,9 +88,6 @@ export default function AIChatPanel({
   ])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
-  // V3: Pre-confirmation "modify then execute" state
-  const [showPreModifyInput, setShowPreModifyInput] = useState(false)
-  const [preModifyText, setPreModifyText] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const prevStepRef = useRef(step)
 
@@ -200,27 +198,14 @@ export default function AIChatPanel({
     }])
   }
 
-  // V3: "修改后执行" — show modify input, then submit with modified params
-  const handleModifyBefore = () => {
-    setShowPreModifyInput(true)
-    setPreModifyText('')
-  }
-
-  const handleSubmitModifyBefore = () => {
+  // V3: "修改后执行" callback — delegates to ConfirmationGateInline for UI
+  const handleModifyBefore = (reply: string) => {
     if (!preStepConfirmData) return
-    const feedback = preModifyText.trim() || '用户要求修改后执行'
-    respondPreConfirm(preStepConfirmData.stepName, false, feedback)
-    setShowPreModifyInput(false)
-    setPreModifyText('')
+    respondPreConfirm(preStepConfirmData.stepName, false, reply)
     setMessages(prev => [...prev, {
       role: 'system',
-      text: `📝 已提交修改请求: ${preStepConfirmData.stepName}\n修改意见: ${feedback}`,
+      text: `📝 已提交修改请求: ${preStepConfirmData.stepName}\n修改意见: ${reply}`,
     }])
-  }
-
-  const handleCancelModifyBefore = () => {
-    setShowPreModifyInput(false)
-    setPreModifyText('')
   }
 
   // ── Send message (no hardcoded extraction — all Agent/WS driven) ──
@@ -289,82 +274,13 @@ export default function AIChatPanel({
 
         {/* ── V3: Pre-step confirmation (before execution) ────────── */}
         {preStepConfirmData && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 space-y-3">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-amber-800">
-                  确认执行: {preStepConfirmData.stepName}
-                </p>
-                <p className="text-xs text-amber-700 mt-1">
-                  预计耗时: {preStepConfirmData.estimatedDuration}
-                </p>
-                {preStepConfirmData.sideEffects.length > 0 && (
-                  <ul className="text-xs text-amber-600 mt-1 list-disc list-inside">
-                    {preStepConfirmData.sideEffects.map((se, i) => (
-                      <li key={i}>{se}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              <button
-                onClick={handleConfirmBefore}
-                disabled={workAreaConfirming}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
-              >
-                <Play className="h-3 w-3" />
-                确认执行
-              </button>
-              <button
-                onClick={handleModifyBefore}
-                disabled={workAreaConfirming}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 transition-colors disabled:opacity-40"
-              >
-                <PenLine className="h-3 w-3" />
-                修改后执行
-              </button>
-              <button
-                onClick={handleRejectBefore}
-                disabled={workAreaConfirming}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border hover:bg-muted transition-colors disabled:opacity-40"
-              >
-                取消
-              </button>
-              {workAreaConfirming && (
-                <span className="text-[10px] text-muted-foreground self-center">
-                  WorkArea 正在确认中...
-                </span>
-              )}
-            </div>
-            {/* ── V3: Modify-before-execute input ────────────────── */}
-            {showPreModifyInput && (
-              <div className="space-y-2">
-                <textarea
-                  value={preModifyText}
-                  onChange={(e) => setPreModifyText(e.target.value)}
-                  placeholder="输入修改意见（如：调整风格、修改角色设定...）"
-                  className="w-full text-xs border border-amber-300 rounded-lg p-2 bg-white focus:outline-none focus:ring-1 focus:ring-amber-400 resize-none"
-                  rows={2}
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleSubmitModifyBefore}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                  >
-                    提交修改
-                  </button>
-                  <button
-                    onClick={handleCancelModifyBefore}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border hover:bg-muted transition-colors"
-                  >
-                    取消
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+          <ConfirmationGateInline
+            preStepConfirmData={preStepConfirmData}
+            workAreaConfirming={workAreaConfirming}
+            onConfirm={handleConfirmBefore}
+            onModify={handleModifyBefore}
+            onReject={handleRejectBefore}
+          />
         )}
 
         {/* ── V3: Post-step confirmation (after execution) ────────── */}
