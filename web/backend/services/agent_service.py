@@ -268,6 +268,46 @@ class AgentService:
         The Agent processes the message and returns a text response.
         """
         try:
+            # ── V3: Pre-process — auto-start pipeline for creation intents ──
+            create_keywords = ["开始创作", "开始规划", "开始生成", "我想创作", "请开始规划",
+                              "帮我创作", "创建一个", "生成一个", "拍一个"]
+            if any(kw in message for kw in create_keywords):
+                logger.info("Auto-starting pipeline for session %s", session_id)
+                try:
+                    from web.backend.models.api_models import PipelinePlanRequest
+                    from web.backend.main import get_pipeline_service
+                    psvc = get_pipeline_service()
+                    # Parse idea/style from message
+                    idea = message
+                    style = "wuxia"
+                    # Extract the core idea
+                    for prefix in ["我想创作一个短剧：", "我想创作：", "拍一个", "创作一个"]:
+                        if prefix in message:
+                            idea = message.split(prefix, 1)[1].split("。")[0].strip()
+                            break
+                    # Detect style from message
+                    for kw, s in [("武侠", "wuxia"), ("古风", "ancient"), ("现代", "modern"),
+                                  ("悬疑", "suspense"), ("喜剧", "comedy")]:
+                        if kw in message:
+                            style = s
+                            break
+                    request = PipelinePlanRequest(
+                        session_id=session_id,
+                        idea=idea,
+                        style=style,
+                        user_requirement="",
+                    )
+                    await psvc.start_planning(request)
+                    return {"reply": (
+                        "🚀 规划已启动！正在分析你的创意并生成故事内容...\n\n"
+                        "你可以在左侧工作区实时查看进度：\n"
+                        "1️⃣ 故事构思 → 2️⃣ 角色提取 → 3️⃣ 剧本编写 → 4️⃣ 分镜设计\n\n"
+                        "生成过程中如有任何想法，随时告诉我。"
+                    )}
+                except Exception as e:
+                    logger.exception("Auto-start pipeline failed for %s", session_id)
+                    # Fall through to LLM chat if pipeline start fails
+
             client = self._get_client()
             if client is None:
                 return {"reply": "Agent chat requires the anthropic Python package."}
@@ -281,7 +321,7 @@ class AgentService:
                 system=AGENT_SYSTEM_PROMPT,
                 messages=conversation,
                 tools=build_tool_schemas(),
-                tool_choice={"type": "auto"},
+                tool_choice={"type": "any"},  # Force tool use — DeepSeek won't choose tools with "auto"
             )
 
             # Build assistant message with ALL content blocks (text + tool_use)

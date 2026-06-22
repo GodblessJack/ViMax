@@ -13,7 +13,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { logger } from '@/lib/logger'
-import type { WsServerEvent, WsClientEvent, WorkflowStepName, PreStepConfirmData } from '@/stores/types'
+import type { WsServerEvent, WsClientEvent } from '@/stores/types'
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -130,59 +130,7 @@ export function useSessionWebSocket(sessionId: string | null) {
           const event = raw as WsServerEvent
           logger.ws('rx', event.type, event)
 
-          // ── V3: Event-specific dispatch (before generic handleWsEvent) ──
-          switch (event.type) {
-            case 'step:need_confirm_before': {
-              const steps = useWorkflowStore.getState().steps
-              const stepIdx = steps.find(s => s.name === event.step)?.index ?? 0
-              const data: PreStepConfirmData = {
-                stepName: event.step as WorkflowStepName,
-                stepIndex: stepIdx,
-                params: event.context.params,
-                estimatedDuration: event.context.estimatedDuration,
-                dependencies: event.context.dependencies,
-                sideEffects: event.context.sideEffects,
-                requestedBy: event.source,
-                timestamp: Date.now(),
-                timeoutMs: 1800000,
-              }
-              store.requestPreConfirm(data)
-              break
-            }
-            case 'step:pre_step_context': {
-              store.updateStepContext({
-                currentProgress: event.currentProgress,
-                availableArtifacts: event.availableArtifacts,
-                agentState: event.agentState,
-              })
-              break
-            }
-            case 'sync:config_changed': {
-              store.setSyncState({
-                configChanges: [
-                  ...useWorkflowStore.getState().syncState.configChanges,
-                  ...event.changes,
-                ].slice(-50),
-              })
-              for (const change of event.changes) {
-                store.updateArtifact(change.path, change.newValue)
-                // ── V3: propagate idea/style changes to store ──
-                if (change.path === 'idea' || change.field === 'idea') {
-                  store.setIdea(String(change.newValue ?? ''))
-                }
-                if (change.path === 'style' || change.field === 'style') {
-                  store.setStyle(String(change.newValue ?? ''))
-                }
-              }
-              break
-            }
-            case 'sync:confirmation_state': {
-              store.handleSyncConfirmation(event.state)
-              break
-            }
-          }
-
-          // Dispatch to store for state updates (backward compat + legacy events)
+          // Dispatch to the WorkflowStore as the single event reducer.
           store.handleWsEvent(event)
         } catch {
           logger.warn('useSessionWebSocket: malformed message', e.data)
@@ -244,7 +192,7 @@ export function useSessionWebSocket(sessionId: string | null) {
   }, [sendEvent])
 
   const sendMessage = useCallback((text: string, context?: { current_step?: string; referenced_artifact?: string }) => {
-    sendEvent({ type: 'user:message', text, context })
+    sendEvent({ type: 'user:message', message: text, context })
   }, [sendEvent])
 
   const sendAction = useCallback((action: string, payload?: unknown) => {
