@@ -243,8 +243,7 @@ class PipelineService:
     # ── Pipeline builders ─────────────────────────────────────────────
 
     @contextmanager
-    @staticmethod
-    def _without_proxy():
+    def _without_proxy(self):
         """Context manager that temporarily removes HTTP_PROXY/ALL_PROXY etc.
 
         ChatOpenAI (via httpx) respects proxy env vars but doesn't support
