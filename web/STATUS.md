@@ -65,6 +65,12 @@
   - 完整 V3 gated 流程验证: create → WS → user:action → agent:workflow_started
     → step:need_confirm_before → user:confirm_before → pipeline:status
   - 预确认门正确弹出并阻塞，确认后步骤开始执行
+- [x] **Mock E2E 全 6 步验证**: VIMAX_MOCK=1 端到端通过 — 2026-06-23T23:31
+  - 6/6 步骤完成: story_generation → character_extraction → script_writing
+    → storyboard_design → character_portraits → video_rendering
+  - 5/5 后确认门弹出 (video_rendering 为最后步骤自动完成)
+  - storyboard_design 多场景循环已修复（不再死循环）
+  - 63 events received, 0 errors
 - [x] **B34 (P0)**: script2video_pipeline.py model_dump crash — 2026-06-23
   - 根因: pipeline_service.run_storyboard_scene 从 JSON 加载 characters 为 dicts
   - plan_text_artifacts → character.model_dump() → AttributeError on dict
