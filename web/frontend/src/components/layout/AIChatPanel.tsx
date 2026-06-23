@@ -226,9 +226,25 @@ export default function AIChatPanel({
       const reply = onSendMessage ? await onSendMessage(userMsg) : null
       if (reply) {
         setMessages(prev => [...prev, { role: 'ai', text: reply }])
+      } else if (step === 1) {
+        // V3: without session, locally extract idea/style from first message
+        // to maintain step-1 UX (user describes idea → assistant replies)
+        setTimeout(() => {
+          setMessages(prev => {
+            const alreadyReplied = prev.some(m => m.role === 'ai' && m.text.includes('收到'))
+            if (alreadyReplied) return prev
+            const idea = userMsg.length > 50 ? userMsg.slice(0, 50) + '...' : userMsg
+            return [...prev, {
+              role: 'ai',
+              text: `收到！我理解你想创作：**"${idea}"**\n\n准备好了就点击左侧的 **开始创作** 按钮，我会一步步帮你完成。`,
+            }]
+          })
+          setSending(false)
+        }, 500)
+        return
       }
     } catch {
-      // Silent fallback — WS-driven messages will appear via storeChatMessages
+      // Silent fallback
     } finally {
       setSending(false)
     }
