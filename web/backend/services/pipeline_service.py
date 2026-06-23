@@ -242,6 +242,23 @@ class PipelineService:
 
     # ── Pipeline builders ─────────────────────────────────────────────
 
+    @contextmanager
+    @staticmethod
+    def _without_proxy():
+        """Context manager that temporarily removes HTTP_PROXY/ALL_PROXY etc.
+
+        ChatOpenAI (via httpx) respects proxy env vars but doesn't support
+        SOCKS proxies. This prevents 'Unknown scheme for proxy URL' errors.
+        """
+        _saved = {}
+        for _k in list(os.environ):
+            if 'proxy' in _k.lower():
+                _saved[_k] = os.environ.pop(_k)
+        try:
+            yield
+        finally:
+            os.environ.update(_saved)
+
     def _build_chat_model(self, multimodal: bool = False):
         from langchain.chat_models import init_chat_model
         root = str(self._root)
@@ -260,27 +277,29 @@ class PipelineService:
             model = model.replace("[1m]", "").strip()
             if "deepseek" not in model.lower():
                 model = "deepseek-chat"
-            return init_chat_model(
-                model=model,
-                model_provider="openai",
-                api_key=deepseek_key,
-                base_url="https://api.deepseek.com/v1",
-                timeout=300,
-                max_retries=0,
-                max_completion_tokens=4096,
-            )
+            with self._without_proxy():
+                return init_chat_model(
+                    model=model,
+                    model_provider="openai",
+                    api_key=deepseek_key,
+                    base_url="https://api.deepseek.com/v1",
+                    timeout=300,
+                    max_retries=0,
+                    max_completion_tokens=4096,
+                )
 
-        # Rendering needs a vision-capable model (ReferenceImageSelector sends image_url)
+        # Rendering needs a vision-capable model
         if multimodal and ds_key:
-            return init_chat_model(
-                model="qwen-plus",
-                model_provider="openai",
-                api_key=ds_key,
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                timeout=300,
-                max_retries=0,
-                max_completion_tokens=4096,
-            )
+            with self._without_proxy():
+                return init_chat_model(
+                    model="qwen-plus",
+                    model_provider="openai",
+                    api_key=ds_key,
+                    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    timeout=300,
+                    max_retries=0,
+                    max_completion_tokens=4096,
+                )
 
         api_key = llm_api_key(root)
         model = llm_model(root)
@@ -294,15 +313,16 @@ class PipelineService:
             model = "qwen-plus"  # DashScope-compatible model (not google/*)
             provider = "openai"
 
-        return init_chat_model(
-            model=model,
-            model_provider=provider,
-            api_key=api_key,
-            base_url=base,
-            timeout=300,
-            max_retries=0,
-            max_completion_tokens=4096,
-        )
+        with self._without_proxy():
+            return init_chat_model(
+                model=model,
+                model_provider=provider,
+                api_key=api_key,
+                base_url=base,
+                timeout=300,
+                max_retries=0,
+                max_completion_tokens=4096,
+            )
 
     def _build_image_generator(self):
         import os
