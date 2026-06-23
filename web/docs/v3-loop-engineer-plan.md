@@ -38,7 +38,7 @@ git:
 4. architecture-v3-design.md 覆盖率 ≥ 95%                → ✅ P0/P1 全实现
 5. 无 P0/P1 未修复 Bug                                   → ✅ 7/7 resolved
 
-刹车: max_turns=120, budget=$3 | 实际: 18 commits, 14 files
+刹车: max_turns=120, budget=$3 | 实际: 25 commits, 15 files
 ```
 
 ### 每轮子目标（用 /goal 启动，用 /reviewer 收尾）
@@ -64,6 +64,7 @@ Round 5: /triage → /reviewer → commit ✅
   └── ✅ Mock E2E 死循环 Bug 发现 → MOCK_MODE 回归修复
   └── ✅ Phase key 冲突修复
   └── ✅ 架构文档 91% → 100%
+  └── ✅ resume() 广播 sync:confirmation_state (面板同步时间差修复)
 ```
 
 ## 三、每轮操作模板（5 步标准流程）
