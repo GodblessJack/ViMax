@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Wand2, CheckCircle, RotateCcw, MessageSquare } from 'lucide-react'
 import type { WizardStep } from '@/lib/types'
 import type { ChatMessage as StoreChatMessage, AgentSuggestion } from '@/stores/types'
