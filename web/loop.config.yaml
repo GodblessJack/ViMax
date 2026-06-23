@@ -32,6 +32,7 @@ brakes:
   write_branches:
     - "feature-v3-upgrade"
     - "long-chain"
+    - "worktree-feature-dynamic-html-artifacts"
     - "fix/*"
     - "feat/*"
     - "auto/*"
