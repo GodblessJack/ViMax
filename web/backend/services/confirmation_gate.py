@@ -60,7 +60,12 @@ class ConfirmationGate:
         self._pending_prompts: dict[tuple[str, str], str] = {}     # (sid,phase) → prompt
         self._pending_steps: dict[tuple[str, str], str] = {}       # (sid,phase) → step_name
         # ── V3: phase & context tracking (also per-phase) ────────────────
-        self._pending_phases: dict[str, str] = {}       # session_id → current active phase ("before"|"after")
+        # session_id → current active phase ("before"|"after")
+        # Design constraint: only ONE phase is active per session at a time.
+        # The V3 workflow is strictly sequential — pre-confirm (before) resolves
+        # before post-confirm (after) is created.  Concurrent phases would
+        # overwrite each other; callers must ensure sequential use.
+        self._pending_phases: dict[str, str] = {}
         self._pending_contexts: dict[tuple[str, str], dict[str, Any]] = {}  # (sid,phase) → context dict
         # ── V3: optional broadcast callback for sending WS events ───────
         self._broadcast_callback: Callable[..., Any] | None = None

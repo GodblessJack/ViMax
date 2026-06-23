@@ -48,13 +48,15 @@ export default function CreateDramaPage() {
       }
       setWizardStep(2)
 
-      // Step 2: wait for WS connection (max 5s, then proceed anyway)
+      // Step 2: wait for WS connection (max 5s, then proceed — message will be queued)
+      let wsReady = false
       await new Promise<void>((resolve) => {
         let elapsed = 0
         const maxWait = 5000
         const check = () => {
           const state = useWorkflowStore.getState()
           if (state.connectionState === 'connected' && state.sessionId === sid) {
+            wsReady = true
             resolve()
           } else if (elapsed >= maxWait) {
             resolve()
@@ -65,6 +67,10 @@ export default function CreateDramaPage() {
         }
         check()
       })
+
+      if (!wsReady) {
+        logger.warn('WS not connected after 5s, message will be queued', { sessionId: sid })
+      }
 
       // Step 3: start workflow via WebSocket (V3 gated — pre_confirm → execute → post_confirm)
       sendWsMessage({

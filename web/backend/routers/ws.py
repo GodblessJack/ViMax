@@ -328,7 +328,9 @@ async def _handle_client_event(
                 idea = payload.get("idea", "") or action_payload.get("idea", "")
                 style = payload.get("style", "") or action_payload.get("style", "wuxia")
                 requirement = payload.get("user_requirement", "") or action_payload.get("user_requirement", "")
-                sid = payload.get("session_id", "") or action_payload.get("session_id", "") or session_id
+                # Security: session_id MUST come from the authenticated WS URL path,
+                # NOT from client payload (prevents cross-session injection).
+                sid = session_id
                 if idea and sid:
                     await websocket.send_json({
                         "type": "agent:workflow_started",

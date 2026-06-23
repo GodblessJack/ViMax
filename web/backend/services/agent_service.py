@@ -934,9 +934,15 @@ class AgentService:
                     )
                 except Exception:
                     logger.exception(
-                        "Workflow: pre-step gate error for %s, proceeding",
+                        "Workflow: pre-step gate error for %s, broadcasting warning",
                         step_name,
                     )
+                    await self.broadcast(session_id, {
+                        "type": "step:error",
+                        "step": step_name,
+                        "error": "预确认门异常，自动跳过继续执行",
+                        "recoverable": True,
+                    })
 
                 # Execute the step via tool_run_step
                 result = await tool_run_step(
