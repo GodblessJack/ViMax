@@ -18,12 +18,12 @@ maker-checker:
 
 git:
 ├── 分支: feature-v3-upgrade
-└── 未提交: MOCK_MODE early exits + hook 修复
+└── 已提交: 42 commits, 20+ files, clean tree
 ```
 
 ## 二、V3 目标分解（用 /goal 驱动）
 
-### 总体目标 ✅ 已完成 (2026-06-23)
+### 总体目标 ✅ 已完成 (2026-06-24)
 
 ```
 /goal 完成 V3 架构全量实现并通过端到端验证 ✅
@@ -36,9 +36,9 @@ git:
    → step:need_confirm_before (预确认门阻塞)
    → user:confirm_before → pipeline:status (门解锁执行)
 4. architecture-v3-design.md 覆盖率 ≥ 95%                → ✅ P0/P1 全实现
-5. 无 P0/P1 未修复 Bug                                   → ✅ 7/7 resolved
+5. 无 P0/P1 未修复 Bug                                   → ✅ 9/9 resolved (B1+B2+B34+6 deviations+reviewer 4 fixes)
 
-刹车: max_turns=120, budget=$3 | 实际: 26 commits, 15 files
+刹车: max_turns=120, budget=$3 | 实际: 42 commits, 20+ files, reviewer 4 fixes
 ```
 
 ### 每轮子目标（用 /goal 启动，用 /reviewer 收尾）
@@ -65,6 +65,9 @@ Round 5: /triage → /reviewer → commit ✅
   └── ✅ Phase key 冲突修复
   └── ✅ 架构文档 91% → 100%
   └── ✅ resume() 广播 sync:confirmation_state (面板同步时间差修复)
+  └── ✅ /reviewer 对抗性审查 4 发现修复 (ws.py session注入/agent异常静默/phase文档/WS超时警告)
+  └── ✅ B34: model_dump crash (dict→CharacterInScene 标准化)
+  └── ✅ Mock E2E 全6步验证 (63 events, 0 errors, 无死循环)
 ```
 
 ## 三、每轮操作模板（5 步标准流程）
