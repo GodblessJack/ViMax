@@ -383,6 +383,7 @@ class ConfirmationGate:
         if event is not None:
             event.set()
             logger.debug("Resumed confirmation gate for session %s phase=%s", session_id, key[1])
+            self._schedule_broadcast_clear(session_id)
         else:
             # Fallback: try legacy session_id-only lookup for callers that
             # don't have phase context (e.g. generic handle_confirm).
@@ -392,11 +393,36 @@ class ConfirmationGate:
                 if ev is not None:
                     ev.set()
                     logger.debug("Resumed confirmation gate for session %s phase=%s (fallback)", session_id, k[1])
+                    self._schedule_broadcast_clear(session_id)
                     return
             logger.warning(
                 "No pending confirmation for session %s (tried phase=%s) -- event discarded",
                 session_id, key[1],
             )
+
+    def _schedule_broadcast_clear(self, session_id: str) -> None:
+        """Schedule an async broadcast to clear confirmation state on all panels.
+
+        Called from resume() after the gate is resolved. Uses fire-and-forget
+        pattern (like cancel_sync) to avoid blocking synchronous callers.
+        """
+        import asyncio as _asyncio
+        try:
+            loop = _asyncio.get_running_loop()
+            loop.create_task(self._broadcast_state(session_id, {
+                "isPending": False,
+                "phase": None,
+                "stepName": None,
+                "stepIndex": None,
+                "message": None,
+                "suggestions": [],
+                "lastConfirmationSource": None,
+                "confirmedBy": None,
+                "timestamp": None,
+                "timeoutAt": None,
+            }))
+        except RuntimeError:
+            pass  # No running loop — skip broadcast
 
     def is_waiting(self, session_id: str, phase: str | None = None) -> bool:
         """Return True if the Agent is currently blocked on this session.
