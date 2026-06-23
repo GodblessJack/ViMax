@@ -275,6 +275,11 @@ class AgentService:
 
         The Agent processes the message and returns a text response.
         """
+        # ── Proxy guard: httpx reads proxy vars at request time ────
+        _saved = {}
+        for _k in list(os.environ):
+            if 'proxy' in _k.lower():
+                _saved[_k] = os.environ.pop(_k)
         try:
             # ── V3: Pre-process — auto-start pipeline for creation intents ──
             create_keywords = ["开始创作", "开始规划", "开始生成", "我想创作", "请开始规划",
@@ -390,6 +395,8 @@ class AgentService:
         except Exception as exc:
             logger.exception("Agent handle_message failed for session %s", session_id)
             return {"reply": f"抱歉，处理消息时出错: {exc}"}
+        finally:
+            os.environ.update(_saved)
 
     async def handle_confirm(
         self,
