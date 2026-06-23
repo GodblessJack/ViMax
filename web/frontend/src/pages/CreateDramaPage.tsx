@@ -36,13 +36,16 @@ export default function CreateDramaPage() {
     if (!idea) return
     setLoading(true)
     try {
-      // Step 1: create session
-      const createResp = await request<{ session_id: string }>(
-        '/sessions',
-        { method: 'POST', body: JSON.stringify({ idea, style: style || 'wuxia', user_requirement: '' }) },
-      )
-      const sid = createResp.session_id
-      setSessionId(sid)
+      // Step 1: create session (or reuse existing from chat auto-create)
+      let sid = useWorkflowStore.getState().sessionId
+      if (!sid) {
+        const createResp = await request<{ session_id: string }>(
+          '/sessions',
+          { method: 'POST', body: JSON.stringify({ idea, style: style || 'wuxia', user_requirement: '' }) },
+        )
+        sid = createResp.session_id
+        setSessionId(sid)
+      }
       setWizardStep(2)
 
       // Step 2: wait for WS connection (max 5s, then proceed anyway)
@@ -54,7 +57,7 @@ export default function CreateDramaPage() {
           if (state.connectionState === 'connected' && state.sessionId === sid) {
             resolve()
           } else if (elapsed >= maxWait) {
-            resolve() // proceed even if WS not ready
+            resolve()
           } else {
             elapsed += 200
             setTimeout(check, 200)

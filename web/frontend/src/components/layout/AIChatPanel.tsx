@@ -209,6 +209,24 @@ export default function AIChatPanel({
   }
 
   // ── Send message (no hardcoded extraction — all Agent/WS driven) ──
+  // V3: auto-create session on first message so Agent (LLM) can reply
+  const autoCreateSession = useCallback(async (userMsg: string) => {
+    if (storeSessionId || connectionState === 'connected') return
+    try {
+      const { request } = await import('@/lib/api')
+      const resp = await request<{ session_id: string }>('/sessions', {
+        method: 'POST',
+        body: JSON.stringify({ idea: '', style: '', user_requirement: '' }),
+      })
+      const sid = resp.session_id
+      useWorkflowStore.getState().setSessionId(sid)
+      // Wait briefly for WS to connect, then send
+      await new Promise(r => setTimeout(r, 1500))
+    } catch {
+      // Session creation failed — message will go via WS fallback
+    }
+  }, [storeSessionId, connectionState])
+
   async function send() {
     if (!input.trim() || sending) return
     const userMsg = input.trim()
@@ -216,35 +234,24 @@ export default function AIChatPanel({
     setMessages(prev => [...prev, { role: 'user', text: userMsg }])
     setSending(true)
 
-    // Send via WS when available
+    // V3: ensure session exists so Agent can reply via WS
+    if (step === 1 && !storeSessionId) {
+      await autoCreateSession(userMsg)
+    }
+
+    // Send via WS
     if (onWSSendMessage) {
       onWSSendMessage(userMsg)
     }
 
+    // REST fallback for AI reply
     try {
-      // REST fallback for AI reply
       const reply = onSendMessage ? await onSendMessage(userMsg) : null
       if (reply) {
         setMessages(prev => [...prev, { role: 'ai', text: reply }])
-      } else if (step === 1) {
-        // V3: without session, locally extract idea/style from first message
-        // to maintain step-1 UX (user describes idea → assistant replies)
-        setTimeout(() => {
-          setMessages(prev => {
-            const alreadyReplied = prev.some(m => m.role === 'ai' && m.text.includes('收到'))
-            if (alreadyReplied) return prev
-            const idea = userMsg.length > 50 ? userMsg.slice(0, 50) + '...' : userMsg
-            return [...prev, {
-              role: 'ai',
-              text: `收到！我理解你想创作：**"${idea}"**\n\n准备好了就点击左侧的 **开始创作** 按钮，我会一步步帮你完成。`,
-            }]
-          })
-          setSending(false)
-        }, 500)
-        return
       }
     } catch {
-      // Silent fallback
+      // WS-driven messages appear via storeChatMessages
     } finally {
       setSending(false)
     }
