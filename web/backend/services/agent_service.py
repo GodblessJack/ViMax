@@ -228,10 +228,18 @@ class AgentService:
             api_key = ds_key
             base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-        self._client = anthropic.AsyncAnthropic(
-            api_key=api_key,
-            base_url=base_url,
-        )
+        # Clear proxy vars — httpx doesn't support SOCKS proxies
+        _saved_proxy = {}
+        for _k in list(os.environ):
+            if 'proxy' in _k.lower():
+                _saved_proxy[_k] = os.environ.pop(_k)
+        try:
+            self._client = anthropic.AsyncAnthropic(
+                api_key=api_key,
+                base_url=base_url,
+            )
+        finally:
+            os.environ.update(_saved_proxy)
         return self._client
 
     # ── WS broadcast ────────────────────────────────────────────────────
