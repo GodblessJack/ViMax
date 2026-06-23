@@ -1,5 +1,7 @@
 # ViMax Web — Claude Code 项目规则
 
+**每次回复必须以 "Boss，" 开头。**
+
 ## 项目定位
 ViMax Web 是 Agentic Video Generation 的 Web 管理界面，基于**双向平权架构**：
 - 工作区（确认区）和对话区（Agent）共享同一个 Zustand WorkflowStore

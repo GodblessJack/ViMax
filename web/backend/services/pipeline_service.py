@@ -135,7 +135,7 @@ class _NoopGenerator:
         "QlAeQAAAAABJRU5ErkJggg=="
     )
 
-    _MINIMAL_MP4: bytes | None = None
+    _MINIMAL_MP4 = None  # bytes | None — lazily populated on first call
 
     @classmethod
     def _get_minimal_mp4(cls) -> bytes:
