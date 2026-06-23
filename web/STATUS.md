@@ -1,6 +1,6 @@
 # ViMax Web 开发状态
 
-> 最后更新: 2026-06-23 23:15 | 会话: pipeline version | 分支: feature-v3-upgrade | V3 Round 1-5 完成 + B34 修复
+> 最后更新: 2026-06-23T23:30 | 会话: pipeline version | 分支: feature-v3-upgrade | V3 全部完成 + B34 修复
 
 ## ✅ Done
 
@@ -75,12 +75,13 @@
 
 ## 📋 Next
 
-### /triage 发现 (2026-06-23 23:15)
+### /triage 发现 (2026-06-23T23:30)
 
-- [P1] **Round 4**: 浏览器端到端验证完整 6 步流程 — 需用户操作验证
-- [P2] **Gap #8**: Artifact diff 追踪 — update_artifact 不生成变更历史
-- [P2] **Gap #9**: Pipeline 内省工具 — inspect_pipeline 可增强子步骤粒度
-- [P3] **maker-checker hook**: 使用系统 python3 而非 .venv，偶发误报
+- [P1] **浏览器 E2E**: 完整 6 步流程验证 — 需用户操作 `localhost:5173/create`
+- [P1] **snapshot 干扰**: Claude Code 快照重启 worktree 后端覆盖 port 8000，需手动 kill
+- [P2] **Gap #8**: Artifact diff 追踪 — 已确认 difflib 实现，可进一步增强
+- [P2] **Gap #9**: Pipeline 内省工具 — inspect_pipeline 已实现，可增强子步骤粒度
+- [P3] **maker-checker hook**: 使用系统 python3 而非 .venv，偶发 pytest 误报
 
 ### 通用待办
 
