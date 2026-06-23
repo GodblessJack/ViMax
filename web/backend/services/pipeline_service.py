@@ -1528,7 +1528,7 @@ class PipelineService:
                     if cancel_evt and cancel_evt.is_set():
                         return {"status": "cancelled", "artifacts": [], "result": {}}
                     scene_idx = scene.get("index", scene.get("idx", 0)) if isinstance(scene, dict) else scene
-                    r = await self.run_storyboard_scene(session_id, scene_idx=scene_idx)
+                    r = await self.run_storyboard_scene(session_id, scene_index=scene_idx)
                     results.append(r)
                 return {"status": "ok", "artifacts": [r.get("artifacts", []) for r in results], "result": results}
 
