@@ -1,6 +1,6 @@
 # ViMax Web 错误记忆
 
-> 来源：39 轮 bugfix + 3 轮 UX enhancement + LoopEngineer 部署经验 + V3 架构升级 | 最后更新: 2026-06-23
+> 来源：39 轮 bugfix + 3 轮 UX enhancement + LoopEngineer 部署经验 + V3 架构升级 + B34 修复 | 最后更新: 2026-06-23 23:25
 
 ---
 
@@ -25,8 +25,9 @@
 | P15 | write_branches 白名单缺失导致分支自动切换 | loop.config.yaml write_branches 不含 feature-v3-upgrade，circuit-breaker hook 自动切回 long-chain | 每次创建新分支时更新 loop.config.yaml write_branches 白名单 | [[docs/v3-loop-engineer-plan]] |
 | P16 | ConfirmationGate pre/post 共用 phase key | _run_workflow_steps 中 wait_for_confirmation 未传 phase 参数，pre/post 都默认 phase="after"，导致 gate key 冲突 | 预确认传 phase="before"，后确认传 phase="after" | [[docs/v3-loop-engineer-plan]] |
 | P17 | run_step() 替代 start_planning() 破坏 MOCK_MODE | 独立步骤方法 (run_story_generation 等) 无 MOCK_MODE guard，而 start_planning() 有 | 每个独立步骤方法添加 MOCK_MODE guard + mock 生成逻辑 | [[docs/v3-loop-engineer-plan]] |
-| P14 | Zustand useCallback 闭包捕获 stale state | handleIframeLoad/handleRefresh 引用旧的 workspaceHtml 而非最新值 | 用 `useWorkflowStore.getState()` 在回调内读取最新 state，而非依赖闭包变量 | [[dynamic-html-artifacts-implementation]] |
-| P15 | Loop Engineer 审查引擎无限收敛 | 对抗性审查每轮都发现更深层理论问题，BLOCKER 数不降反升 | 设定收敛准则: (a) 静态全绿 (b) 功能性 BLOCKER=0 (c) 剩余为理论/防御层 → 记录接受风险后标记 DONE | [[dynamic-html-artifacts-implementation]] |
+| P18 | JSON 加载的 characters 是 dict 但下游调用 .model_dump() | pipeline_service.run_storyboard_scene 从 characters.json json.load() 得到 dict，传给 Script2VideoPipeline.plan_text_artifacts 后调用 character.model_dump() 崩溃 | 入口处标准化: isinstance(c, dict) → CharacterInScene.model_validate(c)。同时在调用方 (pipeline_service) 和接收方 (plan_text_artifacts, __call__) 两端防御 | [[docs/v3-loop-engineer-plan]] |
+| P19 | Zustand useCallback 闭包捕获 stale state | handleIframeLoad/handleRefresh 引用旧的 workspaceHtml 而非最新值 | 用 `useWorkflowStore.getState()` 在回调内读取最新 state，而非依赖闭包变量 | [[dynamic-html-artifacts-implementation]] |
+| P20 | Loop Engineer 审查引擎无限收敛 | 对抗性审查每轮都发现更深层理论问题，BLOCKER 数不降反升 | 设定收敛准则: (a) 静态全绿 (b) 功能性 BLOCKER=0 (c) 剩余为理论/防御层 → 记录接受风险后标记 DONE | [[dynamic-html-artifacts-implementation]] |
 
 ## 🟡 Gotchas (陷阱 — 踩过才知道)
 
@@ -56,6 +57,7 @@
 | G22 | iframe onError prop 不被 HTML/React 支持 (仅 img/script/link 可用) | 用 timeout + artifact:ready 超时检测替代 onError | [[dynamic-html-artifacts-implementation]] |
 | G23 | ConfirmationGate._pending_phases 只存最新 phase | 预确认 (before) 和后确认 (after) 快速交替时，_pending_phases 被覆盖导致 resume() 路由到错误 gate | resume() 始终传显式 phase 参数，不依赖 _pending_phases 自动检测 | [[docs/v3-loop-engineer-plan]] |
 | G24 | ChatOpenAI 构造时验证 SOCKS 代理 URL | LangChain init_chat_model 在 MOCK_MODE 下仍构造 ChatOpenAI，proxy 验证失败导致 step error | MOCK_MODE guard 放在 _build_chat_model() 调用之前 | [[docs/v3-loop-engineer-plan]] |
+| G25 | json.load() 返回 dict 而非 Pydantic model | pipeline_service 从 characters.json 加载后直接传给 Script2VideoPipeline，下游调用 .model_dump() / .idx 崩溃 | 在数据边界 (JSON→Python) 处立即用 model_validate 转换；接收方也在入口处防御性标准化 | [[docs/v3-loop-engineer-plan]] |
 
 ## 🟢 Fixes (已验证的修复配方)
 
@@ -74,8 +76,8 @@
 
 | 类别 | 数量 |
 |------|------|
-| 反模式 (Patterns) | 15 |
-| 陷阱 (Gotchas) | 22 |
+| 反模式 (Patterns) | 20 |
+| 陷阱 (Gotchas) | 25 |
 | 修复配方 (Fixes) | 8 |
 | 累计 bugfix 轮次 | 39 |
 | DynamicWorkspace 实现轮次 | 5 (Loop Engineer 验证) |
