@@ -30,10 +30,10 @@ FAILURES=""
 # Layer 1: Python 后端测试（修改 backend/ 文件时触发）
 # ═══════════════════════════════════════════════════════════════════════
 if [[ "$FILE_PATH" == *"/backend/"* ]] && [[ "$FILE_PATH" == *".py" ]]; then
-    if command -v python3 &>/dev/null && [ -d "$PROJECT_ROOT/backend/tests" ]; then
+    if [ -f "$PROJECT_ROOT/../.venv/bin/python" ] && [ -d "$PROJECT_ROOT/backend/tests" ]; then
         echo "[maker-checker] L1: Python 后端测试..." >&2
-        cd "$PROJECT_ROOT/backend"
-        if python3 -m pytest tests/ -x --no-header -q --timeout=60 2>&1; then
+        cd "$PROJECT_ROOT/.."
+        if .venv/bin/python -m pytest web/backend/tests/ -x --no-header -q 2>&1; then
             echo "[maker-checker] L1: PASSED" >&2
         else
             echo "[maker-checker] L1: FAILED — 后端测试未通过" >&2
