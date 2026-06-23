@@ -38,7 +38,7 @@ git:
 4. architecture-v3-design.md 覆盖率 ≥ 95%                → ✅ P0/P1 全实现
 5. 无 P0/P1 未修复 Bug                                   → ✅ 7/7 resolved
 
-刹车: max_turns=120, budget=$3 | 实际: 25 commits, 15 files
+刹车: max_turns=120, budget=$3 | 实际: 26 commits, 15 files
 ```
 
 ### 每轮子目标（用 /goal 启动，用 /reviewer 收尾）
