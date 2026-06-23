@@ -143,6 +143,14 @@ class Script2VideoPipeline:
             characters = await self.extract_characters(script=script, quiet=quiet)
         else:
             _emit_text_plan_progress(progress, "extract_characters", "Using provided characters", {"provided": True, "count": len(characters)})
+            # Normalize: characters may be plain dicts (loaded from JSON) or Pydantic models
+            normalized: list[CharacterInScene] = []
+            for c in characters:
+                if isinstance(c, dict):
+                    normalized.append(CharacterInScene.model_validate(c))
+                else:
+                    normalized.append(c)
+            characters = normalized
             characters_path = os.path.join(self.working_dir, "characters.json")
             if not os.path.exists(characters_path):
                 with open(characters_path, "w", encoding="utf-8") as f:
@@ -223,6 +231,14 @@ class Script2VideoPipeline:
             #     print(f"☑️ Extracted {len(characters)} characters from script and saved to {characters_path}.")
         else:
             _emit_render_progress(progress, "extract_characters", "Using provided characters for render", {"provided": True, "count": len(characters)})
+            # Normalize: characters may be plain dicts (loaded from JSON) or Pydantic models
+            normalized: list[CharacterInScene] = []
+            for c in characters:
+                if isinstance(c, dict):
+                    normalized.append(CharacterInScene.model_validate(c))
+                else:
+                    normalized.append(c)
+            characters = normalized
             for character in characters:
                 self.character_portrait_events[character.idx] = asyncio.Event()
 

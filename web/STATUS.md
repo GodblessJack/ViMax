@@ -1,6 +1,6 @@
 # ViMax Web 开发状态
 
-> 最后更新: 2026-06-23 | 会话: pipeline version | 分支: feature-v3-upgrade | V3 Round 1-3 完成
+> 最后更新: 2026-06-23 23:15 | 会话: pipeline version | 分支: feature-v3-upgrade | V3 Round 1-5 完成 + B34 修复
 
 ## ✅ Done
 
@@ -65,15 +65,22 @@
   - 完整 V3 gated 流程验证: create → WS → user:action → agent:workflow_started
     → step:need_confirm_before → user:confirm_before → pipeline:status
   - 预确认门正确弹出并阻塞，确认后步骤开始执行
+- [x] **B34 (P0)**: script2video_pipeline.py model_dump crash — 2026-06-23
+  - 根因: pipeline_service.run_storyboard_scene 从 JSON 加载 characters 为 dicts
+  - plan_text_artifacts → character.model_dump() → AttributeError on dict
+  - 修复: plan_text_artifacts + __call__ 入口处标准化 characters (dict → CharacterInScene)
+  - 修复: run_storyboard_scene 加载 characters 后立即转换 CharacterInScene
+  - 修复: Agent 系统提示移除 create_story 推荐 → 引导使用 run_step (V3 gated)
+  - E2E 测试端口修正: 9876 → 8000
 
 ## 📋 Next
 
-### /triage 发现 (2026-06-23)
+### /triage 发现 (2026-06-23 23:15)
 
-- [P1] **Round 4**: 浏览器端到端验证完整 6 步流程 — 需用户操作
-- [P1] **Round 5**: /reviewer 对抗性审查 — 应在 E2E 通过后执行
+- [P1] **Round 4**: 浏览器端到端验证完整 6 步流程 — 需用户操作验证
 - [P2] **Gap #8**: Artifact diff 追踪 — update_artifact 不生成变更历史
-- [P2] **Gap #9**: Pipeline 内省工具 — Agent 无法查询单步进度
+- [P2] **Gap #9**: Pipeline 内省工具 — inspect_pipeline 可增强子步骤粒度
+- [P3] **maker-checker hook**: 使用系统 python3 而非 .venv，偶发误报
 
 ### 通用待办
 

@@ -91,6 +91,67 @@ class _UnavailableGenerator:
         raise RuntimeError("Video generation is not available during planning")
 
 
+# ── Noop generator (for testing without API calls) ──────────────────
+
+def _make_minimal_mp4() -> bytes:
+    """Generate a minimal valid MP4 (1 black frame, ~1 KB) for noop testing."""
+    import subprocess
+    import tempfile
+
+    try:
+        tmp_path = None
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp_path = tmp.name
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-f", "lavfi", "-i",
+                "color=c=black:s=2x2:d=0.1", "-c:v", "libx264",
+                "-preset", "ultrafast", "-crf", "51", "-pix_fmt",
+                "yuv420p", "-an", "-movflags", "+faststart",
+                tmp_path,
+            ],
+            capture_output=True, check=True, timeout=10,
+        )
+        result = Path(tmp_path).read_bytes()
+        Path(tmp_path).unlink(missing_ok=True)
+        return result
+    except Exception:
+        logger.warning("Failed to generate minimal MP4 via ffmpeg, using fallback")
+        # Absolute minimal ftyp+moov stub — valid enough for save() not to crash
+        return b"\x00\x00\x00\x1cftypmp42\x00\x00\x00\x00mp42mp41\x00\x00\x00\x08moov"
+
+
+class _NoopGenerator:
+    """No-op generator that returns placeholder results without calling any API.
+
+    Used when ``VIMAX_MOCK=1`` to avoid API costs during testing.  Returns
+    valid ``ImageOutput`` / ``VideoOutput`` objects so the full pipeline code
+    path is exercised, but no external API is ever contacted.
+    """
+
+    # 1×1 transparent PNG (valid, minimal)  ──────────────────────────
+    _PLACEHOLDER_PNG_B64 = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+P+/HgAEhQJ/"
+        "QlAeQAAAAABJRU5ErkJggg=="
+    )
+
+    _MINIMAL_MP4: bytes | None = None
+
+    @classmethod
+    def _get_minimal_mp4(cls) -> bytes:
+        if cls._MINIMAL_MP4 is None:
+            cls._MINIMAL_MP4 = _make_minimal_mp4()
+        return cls._MINIMAL_MP4
+
+    async def generate_single_image(self, *args: Any, **kwargs: Any) -> Any:
+        from interfaces.image_output import ImageOutput
+        return ImageOutput(fmt="b64", ext="png", data=self._PLACEHOLDER_PNG_B64)
+
+    async def generate_single_video(self, *args: Any, **kwargs: Any) -> Any:
+        from interfaces.video_output import VideoOutput
+        return VideoOutput(fmt="bytes", ext="mp4", data=self._get_minimal_mp4())
+
+
 # ── Output tee — preserve pipeline prints while also logging ────────────
 
 class _TeeStream:
@@ -324,6 +385,8 @@ class PipelineService:
             )
 
     def _build_image_generator(self):
+        if MOCK_MODE:
+            return _NoopGenerator()
         import os
         root = str(self._root)
         api_key = image_api_key(root)
@@ -348,6 +411,8 @@ class PipelineService:
         return ImageGeneratorNanobananaGoogleAPI(api_key=api_key, model=model_name)
 
     def _build_video_generator(self):
+        if MOCK_MODE:
+            return _NoopGenerator()
         import os
         root = str(self._root)
         api_key = video_api_key(root)
@@ -1203,7 +1268,9 @@ class PipelineService:
         characters = []
         if os.path.exists(chars_path):
             with open(chars_path, "r", encoding="utf-8") as f:
-                characters = json.load(f)
+                raw_chars = json.load(f)
+            from interfaces.character import CharacterInScene
+            characters = [CharacterInScene.model_validate(c) if isinstance(c, dict) else c for c in raw_chars]
 
         scene_dir = os.path.join(working_dir, f"scene_{scene_index}")
         os.makedirs(scene_dir, exist_ok=True)

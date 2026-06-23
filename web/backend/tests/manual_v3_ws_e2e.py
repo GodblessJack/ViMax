@@ -17,7 +17,7 @@ import urllib.request
 import websockets
 import pytest
 
-BASE_URL = os.environ.get("TEST_BASE_URL", "http://127.0.0.1:9876")
+BASE_URL = os.environ.get("TEST_BASE_URL", "http://127.0.0.1:8000")
 WS_BASE = BASE_URL.replace("http://", "ws://")
 
 
